@@ -1,0 +1,4 @@
+-- Foundational Skills Migration
+-- This migration is empty; the actual seeding happens in migration.post.ts
+-- The post-migration script creates foundational skills with upsert logic
+-- (idempotent - safe to re-run)

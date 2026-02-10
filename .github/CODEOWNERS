@@ -1,0 +1,41 @@
+# CODEOWNERS - Define code ownership for pull request reviews
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything (fallback)
+# Configure with your GitHub organization teams
+# * @your-org/developers
+
+# Frontend / UI components
+# /src/app/ @your-org/frontend
+# /src/components/ @your-org/frontend
+# /public/ @your-org/frontend
+
+# API routes - require review for security-sensitive changes
+# /src/app/api/ @your-org/backend-tech-leads
+
+# Security-critical files - require careful review
+# /src/lib/apiAuth.ts @your-org/security
+# /src/lib/rateLimit.ts @your-org/security
+# /src/lib/auditLog.ts @your-org/security
+# /src/lib/encryption.ts @your-org/security
+# /src/lib/auth/ @your-org/security
+# /src/app/api/auth/ @your-org/security
+# SECURITY.md @your-org/security
+# /.env.example @your-org/security
+
+# Database schema changes
+# /prisma/ @your-org/backend-tech-leads
+# /scripts/*migration* @your-org/backend-tech-leads
+# /scripts/db-* @your-org/backend-tech-leads
+
+# Infrastructure and deployment
+# /infrastructure/ @your-org/deployment-admins
+# /docker-compose.yml @your-org/deployment-admins
+# /Dockerfile @your-org/deployment-admins
+
+# CI/CD and GitHub config
+# /.github/ @your-org/deployment-admins
+
+# Documentation
+# /docs/ @your-org/developers
+# *.md @your-org/developers

@@ -1,0 +1,66 @@
+# Local Development Environment for Integration Testing
+# This file is excluded from git and CI pipelines
+#
+# Usage:
+#   Start:    docker compose up -d
+#   Stop:     docker compose down
+#   Reset:    docker compose down -v && docker compose up -d
+#   Logs:     docker compose logs -f postgres
+#   Shell:    docker compose exec postgres psql -U devuser -d devuser
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: local-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: devuser
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: devuser
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devuser -d devuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Optional: Redis for caching and job queues
+  redis:
+    image: redis:7-alpine
+    container_name: local-redis
+    restart: unless-stopped
+    ports:
+      - "56379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Adminer for database management UI
+  adminer:
+    image: adminer:latest
+    container_name: local-adminer
+    restart: unless-stopped
+    ports:
+      - "58080:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+    name: transparent-trust-postgres-data
+  redis_data:
+    name: transparent-trust-redis-data

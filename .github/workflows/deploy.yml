@@ -1,0 +1,1211 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_bootstrap:
+        description: 'Run Terraform bootstrap (first-time setup)'
+        required: false
+        default: false
+        type: boolean
+      deploy_infrastructure:
+        description: 'Deploy infrastructure (root, dev, prod)'
+        required: false
+        default: true
+        type: boolean
+      deploy_application:
+        description: 'Deploy application to ECS'
+        required: false
+        default: true
+        type: boolean
+      run_migrations:
+        description: 'Run database migrations after deployment'
+        required: false
+        default: true
+        type: boolean
+      environment:
+        description: 'Environment to deploy (dev or prod)'
+        required: false
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+permissions:
+  id-token: write
+  contents: write
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: 1.9.8
+  ROOT_ACCOUNT_ID: ""  # Set to your AWS root account ID
+  DEV_ACCOUNT_ID: ""   # Set to your AWS dev account ID
+  PROD_ACCOUNT_ID: ""  # Set to your AWS prod account ID
+
+jobs:
+  # =========================================
+  # Detect Changes
+  # =========================================
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      infrastructure_root: ${{ steps.changes.outputs.infrastructure_root }}
+      infrastructure_dev: ${{ steps.changes.outputs.infrastructure_dev }}
+      infrastructure_prod: ${{ steps.changes.outputs.infrastructure_prod }}
+      infrastructure_modules: ${{ steps.changes.outputs.infrastructure_modules }}
+      application: ${{ steps.changes.outputs.application }}
+      target_env: ${{ steps.changes.outputs.target_env }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changes
+        id: changes
+        run: |
+          # For PRs and manual triggers, check all
+          if [ "${{ github.event_name }}" == "pull_request" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "infrastructure_root=true" >> $GITHUB_OUTPUT
+            echo "infrastructure_dev=true" >> $GITHUB_OUTPUT
+            echo "infrastructure_prod=true" >> $GITHUB_OUTPUT
+            echo "infrastructure_modules=true" >> $GITHUB_OUTPUT
+            echo "application=true" >> $GITHUB_OUTPUT
+          else
+            # Check what changed
+            INFRA_ROOT=$(git diff --name-only HEAD~1 HEAD | grep -q "^infrastructure/env/root/" && echo "true" || echo "false")
+            INFRA_DEV=$(git diff --name-only HEAD~1 HEAD | grep -q "^infrastructure/env/dev/" && echo "true" || echo "false")
+            INFRA_PROD=$(git diff --name-only HEAD~1 HEAD | grep -q "^infrastructure/env/prod/" && echo "true" || echo "false")
+            INFRA_MODULES=$(git diff --name-only HEAD~1 HEAD | grep -q "^infrastructure/modules/" && echo "true" || echo "false")
+            APP=$(git diff --name-only HEAD~1 HEAD | grep -qv "^infrastructure/" && echo "true" || echo "false")
+
+            echo "infrastructure_root=$INFRA_ROOT" >> $GITHUB_OUTPUT
+            echo "infrastructure_dev=$INFRA_DEV" >> $GITHUB_OUTPUT
+            echo "infrastructure_prod=$INFRA_PROD" >> $GITHUB_OUTPUT
+            echo "infrastructure_modules=$INFRA_MODULES" >> $GITHUB_OUTPUT
+            echo "application=$APP" >> $GITHUB_OUTPUT
+          fi
+
+          # Determine target environment
+          TARGET_ENV="${{ github.event.inputs.environment }}"
+          if [ -z "$TARGET_ENV" ]; then
+            TARGET_ENV="dev"
+          fi
+          echo "target_env=$TARGET_ENV" >> $GITHUB_OUTPUT
+
+  # =========================================
+  # Terraform Bootstrap (manual only)
+  # =========================================
+  terraform-bootstrap:
+    name: Terraform Bootstrap
+    runs-on: ubuntu-latest
+    needs: [detect-changes]
+    if: github.event_name == 'workflow_dispatch' && inputs.run_bootstrap == true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.DEV_ACCOUNT_ID }}:role/github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init (Bootstrap)
+        working-directory: infrastructure/bootstrap
+        run: terraform init
+
+      - name: Terraform Apply (Bootstrap)
+        working-directory: infrastructure/bootstrap
+        run: terraform apply -auto-approve
+
+  # =========================================
+  # Dev Environment Infrastructure (RUNS FIRST - needed for root NS delegation)
+  # =========================================
+  terraform-dev:
+    name: Infrastructure - Dev Environment
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-bootstrap]
+    if: |
+      always() &&
+      (needs.terraform-bootstrap.result == 'success' || needs.terraform-bootstrap.result == 'skipped') &&
+      (needs.detect-changes.outputs.infrastructure_dev == 'true' ||
+       needs.detect-changes.outputs.infrastructure_modules == 'true' ||
+       github.event_name == 'workflow_dispatch' && inputs.deploy_infrastructure == true)
+
+    outputs:
+      dev_zone_nameservers: ${{ steps.outputs.outputs.dev_zone_nameservers }}
+      certificate_arn: ${{ steps.outputs.outputs.certificate_arn }}
+      certificate_status: ${{ steps.outputs.outputs.certificate_status }}
+
+    defaults:
+      run:
+        working-directory: infrastructure/env/dev  # Create from infrastructure/env/example/
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.DEV_ACCOUNT_ID }}:role/github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color -out=tfplan | tee plan.txt
+        continue-on-error: true
+
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const planPath = 'plan.txt';
+            let plan = '';
+            if (fs.existsSync(planPath)) {
+              plan = fs.readFileSync(planPath, 'utf8');
+            }
+            const planLines = plan.split('\n');
+            const previewLines = planLines.slice(0, 200);
+            const truncated = planLines.length > 200;
+            const planBlock = previewLines.length
+              ? `\`\`\`terraform\n${previewLines.join('\n')}${truncated ? '\n... (truncated)' : ''}\n\`\`\``
+              : '_No plan output captured._';
+
+            const output = `#### Terraform Dev Environment Plan 📋
+
+            #### Terraform Format and Style 🖌 \`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️ \`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖 \`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖 \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan (first 200 lines)</summary>
+
+            ${planBlock}
+
+            </details>
+
+            **Important**: Certificate validation may take 5-30 minutes after apply.
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve tfplan
+
+      - name: Output Dev Zone Nameservers
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: outputs
+        run: |
+          echo "dev_zone_nameservers=$(terraform output -json dev_zone_nameservers)" >> $GITHUB_OUTPUT
+          echo "certificate_arn=$(terraform output -raw certificate_arn)" >> $GITHUB_OUTPUT
+          echo "certificate_status=$(terraform output -raw certificate_status)" >> $GITHUB_OUTPUT
+          echo "domain_name=$(terraform output -raw domain_name)" >> $GITHUB_OUTPUT
+          echo "dns_fqdn=$(terraform output -raw dns_record_fqdn || echo 'not created')" >> $GITHUB_OUTPUT
+
+      - name: Comment with Deployment Info
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const status = '${{ steps.outputs.outputs.certificate_status }}';
+            const statusIcon = status === 'ISSUED' ? '✅' : '⏳';
+
+            const output = `### ${statusIcon} Dev Infrastructure Deployed
+
+            **Domain**: \`${{ steps.outputs.outputs.domain_name }}\`
+            **DNS Record**: \`${{ steps.outputs.outputs.dns_fqdn }}\`
+            **Certificate**: \`${{ steps.outputs.outputs.certificate_arn }}\`
+            **Certificate Status**: \`${status}\`
+
+            ${status !== 'ISSUED' ? '⚠️ Certificate is still validating. This may take 5-30 minutes.' : '✅ Certificate is validated and ready!'}
+
+            **Next Step**: Root account will use these nameservers for NS delegation.
+
+            *Commit SHA: ${{ github.sha }}*`;
+
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            })
+
+  # =========================================
+  # Root Account Infrastructure (RUNS AFTER DEV - needs nameservers)
+  # =========================================
+  terraform-root:
+    name: Infrastructure - Root Account
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-dev]
+    if: |
+      always() &&
+      (needs.terraform-dev.result == 'success' || needs.terraform-dev.result == 'skipped') &&
+      (needs.detect-changes.outputs.infrastructure_root == 'true' ||
+       needs.detect-changes.outputs.infrastructure_dev == 'true' ||
+       github.event_name == 'workflow_dispatch' && inputs.deploy_infrastructure == true)
+
+    outputs:
+      hosted_zone_id: ${{ steps.outputs.outputs.hosted_zone_id }}
+
+    defaults:
+      run:
+        working-directory: infrastructure/env/root  # Create for root account DNS management
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.ROOT_ACCOUNT_ID }}:role/github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        env:
+          TF_VAR_dev_zone_nameservers: ${{ needs.terraform-dev.outputs.dev_zone_nameservers }}
+        run: terraform plan -no-color -out=tfplan | tee plan.txt
+        continue-on-error: true
+
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const planPath = 'plan.txt';
+            let plan = '';
+            if (fs.existsSync(planPath)) {
+              plan = fs.readFileSync(planPath, 'utf8');
+            }
+            const planLines = plan.split('\n');
+            const previewLines = planLines.slice(0, 200);
+            const truncated = planLines.length > 200;
+            const planBlock = previewLines.length
+              ? `\`\`\`terraform\n${previewLines.join('\n')}${truncated ? '\n... (truncated)' : ''}\n\`\`\``
+              : '_No plan output captured._';
+
+            const output = `#### Terraform Root Account Plan 📋
+
+            #### Terraform Format and Style 🖌 \`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️ \`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖 \`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖 \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan (first 200 lines)</summary>
+
+            ${planBlock}
+
+            </details>
+
+            **Note**: This creates NS delegation records for dev.example.com using nameservers from dev account.
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          TF_VAR_dev_zone_nameservers: ${{ needs.terraform-dev.outputs.dev_zone_nameservers }}
+        run: terraform apply -auto-approve tfplan
+
+      - name: Output Zone ID
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: outputs
+        run: |
+          echo "hosted_zone_id=$(terraform output -raw hosted_zone_id)" >> $GITHUB_OUTPUT
+
+      - name: Comment with Outputs
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `### ✅ Root Account NS Delegation Configured
+
+            **Hosted Zone ID**: \`${{ steps.outputs.outputs.hosted_zone_id }}\`
+            **Delegation**: dev.example.com → dev account
+
+            DNS propagation may take 5-60 minutes. Verify with: \`dig NS dev.example.com\`
+
+            *Commit SHA: ${{ github.sha }}*`;
+
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            })
+
+  # =========================================
+  # Prod Environment Infrastructure
+  # =========================================
+  terraform-prod:
+    name: Infrastructure - Prod Environment
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-root, terraform-dev]
+    if: |
+      always() &&
+      (needs.terraform-root.result == 'success' || needs.terraform-root.result == 'skipped') &&
+      needs.terraform-dev.result == 'success' &&
+      github.event_name == 'workflow_dispatch' && inputs.deploy_infrastructure == true && inputs.environment == 'prod'
+
+    defaults:
+      run:
+        working-directory: infrastructure/env/prod  # Create from infrastructure/env/example/
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.PROD_ACCOUNT_ID }}:role/github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        continue-on-error: true
+
+      - name: Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color -out=tfplan
+        continue-on-error: true
+
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Prod Environment Plan 📋
+
+            #### Terraform Format and Style 🖌 \`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️ \`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖 \`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖 \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+
+            </details>
+
+            **⚠️ PRODUCTION DEPLOYMENT** - Review carefully!
+            **Important**: Certificate validation may take 5-30 minutes after apply.
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve tfplan
+
+      - name: Output Certificate Status
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: outputs
+        run: |
+          echo "certificate_arn=$(terraform output -raw certificate_arn)" >> $GITHUB_OUTPUT
+          echo "certificate_status=$(terraform output -raw certificate_status)" >> $GITHUB_OUTPUT
+          echo "domain_name=$(terraform output -raw domain_name)" >> $GITHUB_OUTPUT
+          echo "dns_fqdn=$(terraform output -raw dns_record_fqdn || echo 'not created')" >> $GITHUB_OUTPUT
+
+      - name: Comment with Deployment Info
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const status = '${{ steps.outputs.outputs.certificate_status }}';
+            const statusIcon = status === 'ISSUED' ? '✅' : '⏳';
+
+            const output = `### ${statusIcon} Production Infrastructure Deployed
+
+            **Domain**: \`${{ steps.outputs.outputs.domain_name }}\`
+            **DNS Record**: \`${{ steps.outputs.outputs.dns_fqdn }}\`
+            **Certificate**: \`${{ steps.outputs.outputs.certificate_arn }}\`
+            **Certificate Status**: \`${status}\`
+
+            ${status !== 'ISSUED' ? '⚠️ Certificate is still validating. This may take 5-30 minutes.' : '✅ Certificate is validated and ready!'}
+
+            *Commit SHA: ${{ github.sha }}*`;
+
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: output
+            })
+
+  # =========================================
+  # Application Deployment (Dev)
+  # =========================================
+  deploy-dev:
+    name: Application - Dev Environment
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-dev]
+    if: |
+      always() &&
+      (needs.terraform-dev.result == 'success' || needs.terraform-dev.result == 'skipped') &&
+      (github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.detect-changes.outputs.application == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_application == true && inputs.environment == 'dev')
+
+    env:
+      ECR_REPOSITORY: transparent-trust-development
+      ECS_CLUSTER: transparent-trust-cluster-development
+      ECS_SERVICE: transparent-trust-service-development
+      ECS_TASK_DEFINITION: transparent-trust-development
+      CONTAINER_NAME: app
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.DEV_ACCOUNT_ID }}:role/github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+            --query taskDefinition > task-definition.json
+
+      - name: Fill in new image ID
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Verify deployment
+        run: |
+          echo "✅ Deployment completed successfully"
+          echo "Service: ${{ env.ECS_SERVICE }}"
+          echo "Cluster: ${{ env.ECS_CLUSTER }}"
+          echo "Image: ${{ steps.build-image.outputs.image }}"
+          echo "URL: https://transparent-trust.dev.example.com"
+
+  # =========================================
+  # Database Migrations (Dev)
+  # =========================================
+  migrate-dev:
+    name: Database Migrations - Dev
+    runs-on: ubuntu-latest
+    needs: [detect-changes, deploy-dev]
+    if: |
+      always() &&
+      needs.deploy-dev.result == 'success' &&
+      (github.event_name == 'push' ||
+       github.event_name == 'workflow_dispatch' && inputs.run_migrations == true && inputs.environment == 'dev')
+
+    env:
+      ECS_CLUSTER: transparent-trust-cluster-development
+      ECS_SERVICE: transparent-trust-service-development
+      ECS_TASK_DEFINITION: transparent-trust-development
+      ECR_REPOSITORY: transparent-trust-development
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.DEV_ACCOUNT_ID }}:role/github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get VPC Configuration
+        id: vpc-config
+        run: |
+          SUBNET_IDS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets' \
+            --output text | tr '\t' ',')
+
+          SG_IDS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0].networkConfiguration.awsvpcConfiguration.securityGroups' \
+            --output text | tr '\t' ',')
+
+          echo "subnets=$SUBNET_IDS" >> $GITHUB_OUTPUT
+          echo "security_groups=$SG_IDS" >> $GITHUB_OUTPUT
+
+      - name: Get Database Configuration
+        id: db-config
+        run: |
+          # Get task definition JSON
+          TASK_DEF_JSON=$(aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+            --query 'taskDefinition' \
+            --output json)
+
+          # Check for new RDS-managed secret approach (DB_USERNAME/DB_PASSWORD secrets)
+          DB_USERNAME_SECRET_ARN=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].secrets[] | select(.name == "DB_USERNAME") | .valueFrom // empty')
+
+          if [ -n "$DB_USERNAME_SECRET_ARN" ]; then
+            echo "Using RDS-managed secret approach"
+
+            # Extract environment variables from task definition
+            DB_HOST=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].environment[] | select(.name == "DB_HOST") | .value')
+            DB_PORT=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].environment[] | select(.name == "DB_PORT") | .value // "5432"')
+            DB_NAME=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].environment[] | select(.name == "DB_NAME") | .value')
+            DB_SSL=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].environment[] | select(.name == "DB_SSL") | .value // "true"')
+
+            # Parse the base secret ARN (remove :username:: suffix)
+            RDS_SECRET_ARN=$(echo "$DB_USERNAME_SECRET_ARN" | sed 's/:username::$//')
+
+            # Fetch credentials from RDS-managed secret
+            RDS_SECRET_JSON=$(aws secretsmanager get-secret-value \
+              --secret-id "$RDS_SECRET_ARN" \
+              --query SecretString \
+              --output text)
+
+            DB_USERNAME=$(echo "$RDS_SECRET_JSON" | jq -r '.username')
+            DB_PASSWORD=$(echo "$RDS_SECRET_JSON" | jq -r '.password')
+
+            echo "DB_HOST: $DB_HOST"
+            echo "DB_PORT: $DB_PORT"
+            echo "DB_NAME: $DB_NAME"
+            echo "DB_SSL: $DB_SSL"
+            echo "DB_USERNAME: $DB_USERNAME"
+
+            # Output for use in migration task
+            echo "db_host=$DB_HOST" >> $GITHUB_OUTPUT
+            echo "db_port=$DB_PORT" >> $GITHUB_OUTPUT
+            echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
+            echo "db_ssl=$DB_SSL" >> $GITHUB_OUTPUT
+            echo "db_username=$DB_USERNAME" >> $GITHUB_OUTPUT
+            echo "db_password=$DB_PASSWORD" >> $GITHUB_OUTPUT
+            echo "use_rds_secret=true" >> $GITHUB_OUTPUT
+          else
+            echo "Using legacy DATABASE_URL secret approach"
+
+            # Fall back to legacy DATABASE_URL secret
+            DATABASE_URL_SECRET_ARN=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].secrets[] | select(.name == "DATABASE_URL") | .valueFrom // empty')
+
+            if [ -n "$DATABASE_URL_SECRET_ARN" ]; then
+              # Parse the base secret ARN (remove :url:: suffix if present)
+              BASE_SECRET_ARN=$(echo "$DATABASE_URL_SECRET_ARN" | sed 's/:url::$//')
+
+              SECRET_JSON=$(aws secretsmanager get-secret-value \
+                --secret-id "$BASE_SECRET_ARN" \
+                --query SecretString \
+                --output text)
+
+              DATABASE_URL=$(echo "$SECRET_JSON" | jq -r 'if type == "object" then .url else . end' 2>/dev/null || echo "$SECRET_JSON")
+
+              MASKED_URL=$(echo "$DATABASE_URL" | sed 's/:.*@/:****@/')
+              echo "Extracted DATABASE_URL: $MASKED_URL"
+
+              echo "database_url=$DATABASE_URL" >> $GITHUB_OUTPUT
+              echo "use_rds_secret=false" >> $GITHUB_OUTPUT
+            else
+              echo "ERROR: No database configuration found in task definition"
+              exit 1
+            fi
+          fi
+
+      - name: Create Log Group
+        run: |
+          aws logs create-log-group \
+            --log-group-name "/aws/ecs/${{ env.ECS_SERVICE }}" \
+            2>/dev/null || echo "Log group already exists"
+
+      - name: Register Migration Task
+        run: |
+          USE_RDS_SECRET="${{ steps.db-config.outputs.use_rds_secret }}"
+
+          if [ "$USE_RDS_SECRET" = "true" ]; then
+            # New RDS-managed secret approach: pass DB_* env vars
+            # The app will construct DATABASE_URL at runtime via ensureDatabaseUrl()
+            DB_HOST="${{ steps.db-config.outputs.db_host }}"
+            DB_PORT="${{ steps.db-config.outputs.db_port }}"
+            DB_NAME="${{ steps.db-config.outputs.db_name }}"
+            DB_SSL="${{ steps.db-config.outputs.db_ssl }}"
+            DB_USERNAME="${{ steps.db-config.outputs.db_username }}"
+            DB_PASSWORD="${{ steps.db-config.outputs.db_password }}"
+
+            # Escape password for JSON
+            DB_PASSWORD_ESCAPED=$(node -e "console.log(JSON.stringify(process.argv[1]))" "$DB_PASSWORD")
+
+            TASK_DEF=$(cat <<EOF
+          {
+            "family": "transparent-trust-migration-development",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "$(aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} --query 'taskDefinition.executionRoleArn' --output text)",
+            "taskRoleArn": "$(aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} --query 'taskDefinition.taskRoleArn' --output text)",
+            "containerDefinitions": [
+              {
+                "name": "migration",
+                "image": "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}",
+                "essential": true,
+                "command": ["node", "scripts/run-migrations.js"],
+                "environment": [
+                  { "name": "DB_HOST", "value": "$DB_HOST" },
+                  { "name": "DB_PORT", "value": "$DB_PORT" },
+                  { "name": "DB_NAME", "value": "$DB_NAME" },
+                  { "name": "DB_SSL", "value": "$DB_SSL" },
+                  { "name": "DB_USERNAME", "value": "$DB_USERNAME" },
+                  { "name": "DB_PASSWORD", "value": $DB_PASSWORD_ESCAPED }
+                ],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/aws/ecs/${{ env.ECS_SERVICE }}",
+                    "awslogs-region": "${{ env.AWS_REGION }}",
+                    "awslogs-stream-prefix": "migration"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+            )
+          else
+            # Legacy DATABASE_URL approach
+            DATABASE_URL="${{ steps.db-config.outputs.database_url }}"
+            DATABASE_URL_ESCAPED=$(node -e "console.log(JSON.stringify(process.argv[1]))" "$DATABASE_URL")
+
+            TASK_DEF=$(cat <<EOF
+          {
+            "family": "transparent-trust-migration-development",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "$(aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} --query 'taskDefinition.executionRoleArn' --output text)",
+            "taskRoleArn": "$(aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} --query 'taskDefinition.taskRoleArn' --output text)",
+            "containerDefinitions": [
+              {
+                "name": "migration",
+                "image": "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}",
+                "essential": true,
+                "command": ["node", "scripts/run-migrations.js"],
+                "environment": [
+                  { "name": "DATABASE_URL", "value": $DATABASE_URL_ESCAPED }
+                ],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/aws/ecs/${{ env.ECS_SERVICE }}",
+                    "awslogs-region": "${{ env.AWS_REGION }}",
+                    "awslogs-stream-prefix": "migration"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+            )
+          fi
+
+          echo "$TASK_DEF" > migration-task-def.json
+          aws ecs register-task-definition --cli-input-json file://migration-task-def.json
+
+      - name: Run Migration
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --task-definition transparent-trust-migration-development \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ steps.vpc-config.outputs.subnets }}],securityGroups=[${{ steps.vpc-config.outputs.security_groups }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Migration task started: $TASK_ARN"
+
+          aws ecs wait tasks-stopped \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks "$TASK_ARN"
+
+          TASK_DETAILS=$(aws ecs describe-tasks \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks "$TASK_ARN" \
+            --query 'tasks[0]' \
+            --output json)
+
+          EXIT_CODE=$(echo "$TASK_DETAILS" | jq -r '.containers[0].exitCode // "None"')
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed with exit code: $EXIT_CODE"
+            TASK_ID=$(echo "$TASK_ARN" | sed 's/.*\///')
+            aws logs get-log-events \
+              --log-group-name "/aws/ecs/${{ env.ECS_SERVICE }}" \
+              --log-stream-name "migration/migration/$TASK_ID" \
+              --limit 50 \
+              --query 'events[*].message' \
+              --output text 2>/dev/null || echo "Could not fetch logs"
+            exit 1
+          fi
+
+          echo "✅ Migration completed successfully"
+
+  # =========================================
+  # Application Deployment (Prod)
+  # =========================================
+  deploy-prod:
+    name: Application - Prod Environment
+    runs-on: ubuntu-latest
+    needs: [detect-changes, terraform-prod]
+    if: |
+      always() &&
+      (needs.terraform-prod.result == 'success' || needs.terraform-prod.result == 'skipped') &&
+      (github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.detect-changes.outputs.application == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_application == true && inputs.environment == 'prod')
+
+    env:
+      ECR_REPOSITORY: transparent-trust-production
+      ECS_CLUSTER: transparent-trust-cluster-production
+      ECS_SERVICE: transparent-trust-service-production
+      ECS_TASK_DEFINITION: transparent-trust-production
+      CONTAINER_NAME: app
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.PROD_ACCOUNT_ID }}:role/github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+            --query taskDefinition > task-definition.json
+
+      - name: Fill in new image ID
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Verify deployment
+        run: |
+          echo "✅ Deployment completed successfully"
+          echo "Service: ${{ env.ECS_SERVICE }}"
+          echo "Cluster: ${{ env.ECS_CLUSTER }}"
+          echo "Image: ${{ steps.build-image.outputs.image }}"
+          echo "URL: https://transparent-trust.prod.example.com"
+
+  # =========================================
+  # Database Migrations (Prod)
+  # =========================================
+  migrate-prod:
+    name: Database Migrations - Prod
+    runs-on: ubuntu-latest
+    needs: [detect-changes, deploy-prod]
+    if: |
+      always() &&
+      needs.deploy-prod.result == 'success' &&
+      (github.event_name == 'push' ||
+       github.event_name == 'workflow_dispatch' && inputs.run_migrations == true && inputs.environment == 'prod')
+
+    env:
+      ECS_CLUSTER: transparent-trust-cluster-production
+      ECS_SERVICE: transparent-trust-service-production
+      ECS_TASK_DEFINITION: transparent-trust-production
+      ECR_REPOSITORY: transparent-trust-production
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.PROD_ACCOUNT_ID }}:role/github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get VPC Configuration
+        id: vpc-config
+        run: |
+          SUBNET_IDS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0].networkConfiguration.awsvpcConfiguration.subnets' \
+            --output text | tr '\t' ',')
+
+          SG_IDS=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --query 'services[0].networkConfiguration.awsvpcConfiguration.securityGroups' \
+            --output text | tr '\t' ',')
+
+          echo "subnets=$SUBNET_IDS" >> $GITHUB_OUTPUT
+          echo "security_groups=$SG_IDS" >> $GITHUB_OUTPUT
+
+      - name: Get Database Configuration
+        id: db-config
+        run: |
+          # Get task definition JSON
+          TASK_DEF_JSON=$(aws ecs describe-task-definition \
+            --task-definition ${{ env.ECS_TASK_DEFINITION }} \
+            --query 'taskDefinition' \
+            --output json)
+
+          # Check for new RDS-managed secret approach (DB_USERNAME/DB_PASSWORD secrets)
+          DB_USERNAME_SECRET_ARN=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].secrets[] | select(.name == "DB_USERNAME") | .valueFrom // empty')
+
+          if [ -n "$DB_USERNAME_SECRET_ARN" ]; then
+            echo "Using RDS-managed secret approach"
+
+            # Extract environment variables from task definition
+            DB_HOST=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].environment[] | select(.name == "DB_HOST") | .value')
+            DB_PORT=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].environment[] | select(.name == "DB_PORT") | .value // "5432"')
+            DB_NAME=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].environment[] | select(.name == "DB_NAME") | .value')
+            DB_SSL=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].environment[] | select(.name == "DB_SSL") | .value // "true"')
+
+            # Parse the base secret ARN (remove :username:: suffix)
+            RDS_SECRET_ARN=$(echo "$DB_USERNAME_SECRET_ARN" | sed 's/:username::$//')
+
+            # Fetch credentials from RDS-managed secret
+            RDS_SECRET_JSON=$(aws secretsmanager get-secret-value \
+              --secret-id "$RDS_SECRET_ARN" \
+              --query SecretString \
+              --output text)
+
+            DB_USERNAME=$(echo "$RDS_SECRET_JSON" | jq -r '.username')
+            DB_PASSWORD=$(echo "$RDS_SECRET_JSON" | jq -r '.password')
+
+            echo "DB_HOST: $DB_HOST"
+            echo "DB_PORT: $DB_PORT"
+            echo "DB_NAME: $DB_NAME"
+            echo "DB_SSL: $DB_SSL"
+            echo "DB_USERNAME: $DB_USERNAME"
+
+            # Output for use in migration task
+            echo "db_host=$DB_HOST" >> $GITHUB_OUTPUT
+            echo "db_port=$DB_PORT" >> $GITHUB_OUTPUT
+            echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
+            echo "db_ssl=$DB_SSL" >> $GITHUB_OUTPUT
+            echo "db_username=$DB_USERNAME" >> $GITHUB_OUTPUT
+            echo "db_password=$DB_PASSWORD" >> $GITHUB_OUTPUT
+            echo "use_rds_secret=true" >> $GITHUB_OUTPUT
+          else
+            echo "Using legacy DATABASE_URL secret approach"
+
+            # Fall back to legacy DATABASE_URL secret
+            DATABASE_URL_SECRET_ARN=$(echo "$TASK_DEF_JSON" | jq -r '.containerDefinitions[0].secrets[] | select(.name == "DATABASE_URL") | .valueFrom // empty')
+
+            if [ -n "$DATABASE_URL_SECRET_ARN" ]; then
+              # Parse the base secret ARN (remove :url:: suffix if present)
+              BASE_SECRET_ARN=$(echo "$DATABASE_URL_SECRET_ARN" | sed 's/:url::$//')
+
+              SECRET_JSON=$(aws secretsmanager get-secret-value \
+                --secret-id "$BASE_SECRET_ARN" \
+                --query SecretString \
+                --output text)
+
+              DATABASE_URL=$(echo "$SECRET_JSON" | jq -r 'if type == "object" then .url else . end' 2>/dev/null || echo "$SECRET_JSON")
+
+              MASKED_URL=$(echo "$DATABASE_URL" | sed 's/:.*@/:****@/')
+              echo "Extracted DATABASE_URL: $MASKED_URL"
+
+              echo "database_url=$DATABASE_URL" >> $GITHUB_OUTPUT
+              echo "use_rds_secret=false" >> $GITHUB_OUTPUT
+            else
+              echo "ERROR: No database configuration found in task definition"
+              exit 1
+            fi
+          fi
+
+      - name: Create Log Group
+        run: |
+          aws logs create-log-group \
+            --log-group-name "/aws/ecs/${{ env.ECS_SERVICE }}" \
+            2>/dev/null || echo "Log group already exists"
+
+      - name: Register Migration Task
+        run: |
+          USE_RDS_SECRET="${{ steps.db-config.outputs.use_rds_secret }}"
+
+          if [ "$USE_RDS_SECRET" = "true" ]; then
+            # New RDS-managed secret approach: pass DB_* env vars
+            # The app will construct DATABASE_URL at runtime via ensureDatabaseUrl()
+            DB_HOST="${{ steps.db-config.outputs.db_host }}"
+            DB_PORT="${{ steps.db-config.outputs.db_port }}"
+            DB_NAME="${{ steps.db-config.outputs.db_name }}"
+            DB_SSL="${{ steps.db-config.outputs.db_ssl }}"
+            DB_USERNAME="${{ steps.db-config.outputs.db_username }}"
+            DB_PASSWORD="${{ steps.db-config.outputs.db_password }}"
+
+            # Escape password for JSON
+            DB_PASSWORD_ESCAPED=$(node -e "console.log(JSON.stringify(process.argv[1]))" "$DB_PASSWORD")
+
+            TASK_DEF=$(cat <<EOF
+          {
+            "family": "transparent-trust-migration-production",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "$(aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} --query 'taskDefinition.executionRoleArn' --output text)",
+            "taskRoleArn": "$(aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} --query 'taskDefinition.taskRoleArn' --output text)",
+            "containerDefinitions": [
+              {
+                "name": "migration",
+                "image": "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}",
+                "essential": true,
+                "command": ["node", "scripts/run-migrations.js"],
+                "environment": [
+                  { "name": "DB_HOST", "value": "$DB_HOST" },
+                  { "name": "DB_PORT", "value": "$DB_PORT" },
+                  { "name": "DB_NAME", "value": "$DB_NAME" },
+                  { "name": "DB_SSL", "value": "$DB_SSL" },
+                  { "name": "DB_USERNAME", "value": "$DB_USERNAME" },
+                  { "name": "DB_PASSWORD", "value": $DB_PASSWORD_ESCAPED }
+                ],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/aws/ecs/${{ env.ECS_SERVICE }}",
+                    "awslogs-region": "${{ env.AWS_REGION }}",
+                    "awslogs-stream-prefix": "migration"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+            )
+          else
+            # Legacy DATABASE_URL approach
+            DATABASE_URL="${{ steps.db-config.outputs.database_url }}"
+            DATABASE_URL_ESCAPED=$(node -e "console.log(JSON.stringify(process.argv[1]))" "$DATABASE_URL")
+
+            TASK_DEF=$(cat <<EOF
+          {
+            "family": "transparent-trust-migration-production",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "256",
+            "memory": "512",
+            "executionRoleArn": "$(aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} --query 'taskDefinition.executionRoleArn' --output text)",
+            "taskRoleArn": "$(aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} --query 'taskDefinition.taskRoleArn' --output text)",
+            "containerDefinitions": [
+              {
+                "name": "migration",
+                "image": "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}",
+                "essential": true,
+                "command": ["node", "scripts/run-migrations.js"],
+                "environment": [
+                  { "name": "DATABASE_URL", "value": $DATABASE_URL_ESCAPED }
+                ],
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/aws/ecs/${{ env.ECS_SERVICE }}",
+                    "awslogs-region": "${{ env.AWS_REGION }}",
+                    "awslogs-stream-prefix": "migration"
+                  }
+                }
+              }
+            ]
+          }
+          EOF
+            )
+          fi
+
+          echo "$TASK_DEF" > migration-task-def.json
+          aws ecs register-task-definition --cli-input-json file://migration-task-def.json
+
+      - name: Run Migration
+        run: |
+          TASK_ARN=$(aws ecs run-task \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --task-definition transparent-trust-migration-production \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ steps.vpc-config.outputs.subnets }}],securityGroups=[${{ steps.vpc-config.outputs.security_groups }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Migration task started: $TASK_ARN"
+
+          aws ecs wait tasks-stopped \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks "$TASK_ARN"
+
+          TASK_DETAILS=$(aws ecs describe-tasks \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --tasks "$TASK_ARN" \
+            --query 'tasks[0]' \
+            --output json)
+
+          EXIT_CODE=$(echo "$TASK_DETAILS" | jq -r '.containers[0].exitCode // "None"')
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed with exit code: $EXIT_CODE"
+            TASK_ID=$(echo "$TASK_ARN" | sed 's/.*\///')
+            aws logs get-log-events \
+              --log-group-name "/aws/ecs/${{ env.ECS_SERVICE }}" \
+              --log-stream-name "migration/migration/$TASK_ID" \
+              --limit 50 \
+              --query 'events[*].message' \
+              --output text 2>/dev/null || echo "Could not fetch logs"
+            exit 1
+          fi
+
+          echo "✅ Migration completed successfully"

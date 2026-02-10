@@ -1,0 +1,68 @@
+[
+  {
+    "title": "Account Background & Contract Details",
+    "slug": "account-background-contract-details",
+    "libraryId": "customers",
+    "summary": "Core account information including contract terms, company details, and relationship status"
+  },
+  {
+    "title": "Strategic Objectives & Success Metrics",
+    "slug": "strategic-objectives-success-metrics",
+    "libraryId": "customers",
+    "summary": "Business strategies, data/AI initiatives, and measurable goals with timelines"
+  },
+  {
+    "title": "Requirements, Compliance & Security",
+    "slug": "requirements-compliance-security",
+    "libraryId": "customers",
+    "summary": "Technical requirements, business criteria, regulatory compliance, and security standards"
+  },
+  {
+    "title": "Product Usage & Adoption Patterns",
+    "slug": "product-usage-adoption-patterns",
+    "libraryId": "customers",
+    "summary": "How the customer uses our product, adoption metrics, and usage patterns"
+  },
+  {
+    "title": "Organizational Structure & Key Contacts",
+    "slug": "organizational-structure-key-contacts",
+    "libraryId": "customers",
+    "summary": "Org chart, decision makers, key stakeholders, and contact information"
+  },
+  {
+    "title": "Value Delivered & Use Case Outcomes",
+    "slug": "value-delivered-use-case-outcomes",
+    "libraryId": "customers",
+    "summary": "Specific business value realized, ROI metrics, and success stories"
+  },
+  {
+    "title": "Coverage & Expansion Opportunities",
+    "slug": "coverage-expansion-opportunities",
+    "libraryId": "customers",
+    "summary": "Current coverage, untapped use cases, and expansion potential"
+  },
+  {
+    "title": "Competitive Intelligence & Positioning",
+    "slug": "competitive-intelligence-positioning",
+    "libraryId": "customers",
+    "summary": "Competitive landscape, our positioning, and win/loss information"
+  },
+  {
+    "title": "Partner Relationships & Ecosystem",
+    "slug": "partner-relationships-ecosystem",
+    "libraryId": "customers",
+    "summary": "Technology partners, integrations, and ecosystem relationships"
+  },
+  {
+    "title": "Current State & Transformation Vision",
+    "slug": "current-state-transformation-vision",
+    "libraryId": "customers",
+    "summary": "Customer's current data/technology state and digital transformation goals"
+  },
+  {
+    "title": "Business Impact & Financial Value",
+    "slug": "business-impact-financial-value",
+    "libraryId": "customers",
+    "summary": "Business impact modeling, financial ROI, and value quantification"
+  }
+]
