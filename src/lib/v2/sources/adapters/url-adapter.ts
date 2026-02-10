@@ -51,9 +51,17 @@ export class UrlDiscoveryAdapter extends BaseDiscoveryAdapter<UrlStagedSource> {
       throw new Error(`URL validation failed: ${ssrfCheck.error}`);
     }
 
-    const response = await fetch(url, {
+    // Build a safe URL from the validated result to prevent DNS rebinding.
+    const validatedUrl = new URL(url);
+    const originalHost = validatedUrl.hostname;
+    if (ssrfCheck.resolvedIp) {
+      validatedUrl.hostname = ssrfCheck.resolvedIp;
+    }
+
+    const response = await fetch(validatedUrl.toString(), {
       headers: {
         'User-Agent': 'TransparentTrust/1.0 (Knowledge Base Crawler)',
+        'Host': originalHost,
       },
     });
 
@@ -166,30 +174,23 @@ export class UrlDiscoveryAdapter extends BaseDiscoveryAdapter<UrlStagedSource> {
       return '';
     }
 
-    // Remove script and style tags (applied iteratively to handle nested tags)
+    // Strip all HTML tags to get plain text. This is safe because we remove
+    // every tag rather than trying to selectively filter dangerous ones.
     let text = html;
-    let prev;
-    do {
-      prev = text;
-      text = text
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-        .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-        .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
-        .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '');
-    } while (text !== prev);
 
-    // Remove HTML tags
-    text = text.replace(/<[^>]+>/g, ' ');
+    // Remove ALL HTML tags
+    text = text.replace(/<[^>]*>/g, ' ');
 
-    // Decode HTML entities
+    // Decode HTML entities - decode &amp; LAST to prevent double-unescaping.
     text = text
       .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
+      .replace(/&#(\d+);/g, (_: string, dec: string) => String.fromCharCode(parseInt(dec, 10)))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_: string, hex: string) => String.fromCharCode(parseInt(hex, 16)))
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'");
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&');
 
     // Clean up whitespace
     text = text

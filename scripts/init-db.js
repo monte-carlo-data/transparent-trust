@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Database initialization script
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const path = require('path');
 
 try {
@@ -13,7 +13,7 @@ try {
   }
 
   console.log('Pushing schema to database...');
-  execSync(`${prismaPath} db push --skip-generate`, {
+  execFileSync(prismaPath, ['db', 'push', '--skip-generate'], {
     stdio: 'inherit',
     cwd: __dirname,
     env: process.env

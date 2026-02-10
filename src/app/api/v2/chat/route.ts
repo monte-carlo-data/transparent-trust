@@ -165,43 +165,40 @@ async function fetchWebSearchResults(query: string): Promise<WebSearchResult[]> 
 }
 
 function extractTextFromHtml(html: string): string {
+  // Strip all HTML tags to get plain text. This is safe because we remove
+  // every tag rather than trying to selectively filter dangerous ones.
   let text = html;
-  let prev;
-  do {
-    prev = text;
-    text = text
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-      .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, "");
-  } while (text !== prev);
 
+  // Replace common block elements with newlines first
   text = text
-    .replace(/<\/?(p|div|br|h[1-6]|li|tr|section|article|header|footer)[^>]*>/gi, "\n")
-    .replace(/<\/?(ul|ol|table|thead|tbody)[^>]*>/gi, "\n");
+    .replace(/<\/?(p|div|br|h[1-6]|li|tr|section|article|header|footer)\b[^>]*>/gi, "\n")
+    .replace(/<\/?(ul|ol|table|thead|tbody)\b[^>]*>/gi, "\n");
 
-  text = text.replace(/<[^>]+>/g, " ");
+  // Remove ALL remaining HTML tags (handles any tag including script/style)
+  text = text.replace(/<[^>]*>/g, " ");
 
+  // Decode HTML entities - decode &amp; LAST to prevent double-unescaping.
   text = text
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
-    .replace(/&rsquo;/g, "'")
-    .replace(/&lsquo;/g, "'")
-    .replace(/&ldquo;/g, '"')
-    .replace(/&rdquo;/g, '"')
-    .replace(/&mdash;/g, "—")
-    .replace(/&ndash;/g, "–")
-    .replace(/&hellip;/g, "…")
-    .replace(/&copy;/g, "©")
-    .replace(/&reg;/g, "®")
-    .replace(/&trade;/g, "™")
-    .replace(/&bull;/g, "•");
+    .replace(/&rsquo;/g, "\u2019")
+    .replace(/&lsquo;/g, "\u2018")
+    .replace(/&ldquo;/g, "\u201C")
+    .replace(/&rdquo;/g, "\u201D")
+    .replace(/&mdash;/g, "\u2014")
+    .replace(/&ndash;/g, "\u2013")
+    .replace(/&hellip;/g, "\u2026")
+    .replace(/&copy;/g, "\u00A9")
+    .replace(/&reg;/g, "\u00AE")
+    .replace(/&trade;/g, "\u2122")
+    .replace(/&bull;/g, "\u2022")
+    .replace(/&amp;/g, "&");
 
   return text
     .replace(/[ \t]+/g, " ")

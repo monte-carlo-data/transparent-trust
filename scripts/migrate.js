@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Simple migration runner that doesn't depend on complex dependencies
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const path = require('path');
 
 try {
@@ -12,7 +12,7 @@ try {
     throw new Error('Invalid prisma path');
   }
 
-  execSync(`${prismaPath} migrate deploy`, {
+  execFileSync(prismaPath, ['migrate', 'deploy'], {
     stdio: 'inherit',
     cwd: __dirname,
     env: process.env

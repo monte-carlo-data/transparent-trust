@@ -17,7 +17,7 @@
  *   DB_SECRET_ARN - Optional, ARN of database secret
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -218,11 +218,10 @@ async function runPostMigrationScripts() {
         log(`  ✗ Skipping invalid path: ${script.path}`, 'red');
         continue;
       }
-      execSync(`npx tsx ${JSON.stringify(resolvedPath)}`, {
+      execFileSync('npx', ['tsx', resolvedPath], {
         stdio: 'inherit',
         env: process.env,
         cwd: path.join(__dirname, '..'),
-        shell: true,
       });
       log(`  ✓ ${script.folder} completed`, 'green');
     } catch (error) {

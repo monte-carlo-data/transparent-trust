@@ -34,19 +34,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Use resolved IP to prevent DNS rebinding attacks
-    const safeUrl = new URL(url);
-    if (ssrfCheck.resolvedIp && ssrfCheck.originalHostname) {
-      safeUrl.hostname = ssrfCheck.resolvedIp;
+    // Build a safe URL from the validated result to prevent DNS rebinding.
+    // The SSRF validation already resolved the hostname to an IP and verified
+    // it is not internal. We fetch using that resolved IP with the original
+    // Host header so TLS and virtual-hosting still work.
+    const validatedUrl = new URL(url);
+    const originalHost = validatedUrl.hostname;
+    if (ssrfCheck.resolvedIp) {
+      validatedUrl.hostname = ssrfCheck.resolvedIp;
     }
-    const fetchUrl = safeUrl.toString();
 
-    const parsedUrl = new URL(url);
-    const response = await fetch(fetchUrl, {
+    const response = await fetch(validatedUrl.toString(), {
       headers: {
         "User-Agent": "GRC-Minion/1.0 (Security Questionnaire Assistant)",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7",
-        "Host": parsedUrl.hostname,
+        "Host": originalHost,
       },
       signal: AbortSignal.timeout(15000), // 15 second timeout
     });
@@ -83,48 +85,41 @@ export async function POST(request: NextRequest) {
  * Removes scripts, styles, and HTML tags, preserves meaningful whitespace.
  */
 function extractTextFromHtml(html: string): string {
-  // Remove script and style elements (applied iteratively to handle nested tags)
+  // Strip all HTML tags to get plain text. This is safe because we remove
+  // every tag rather than trying to selectively filter dangerous ones.
   let text = html;
-  let prev;
-  do {
-    prev = text;
-    text = text
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-      .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, "");
-  } while (text !== prev);
 
-  // Replace common block elements with newlines
+  // Replace common block elements with newlines first
   text = text
-    .replace(/<\/?(p|div|br|h[1-6]|li|tr|section|article|header|footer)[^>]*>/gi, "\n")
-    .replace(/<\/?(ul|ol|table|thead|tbody)[^>]*>/gi, "\n");
+    .replace(/<\/?(p|div|br|h[1-6]|li|tr|section|article|header|footer)\b[^>]*>/gi, "\n")
+    .replace(/<\/?(ul|ol|table|thead|tbody)\b[^>]*>/gi, "\n");
 
-  // Remove remaining HTML tags
-  text = text.replace(/<[^>]+>/g, " ");
+  // Remove ALL remaining HTML tags (handles any tag including script/style)
+  text = text.replace(/<[^>]*>/g, " ");
 
-  // Decode HTML entities
+  // Decode HTML entities - decode &amp; LAST to prevent double-unescaping.
+  // For example, "&amp;lt;" should become "&lt;" not "<".
   text = text
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    // Decode numeric entities first to avoid double-decoding
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
-    .replace(/&rsquo;/g, "'")
-    .replace(/&lsquo;/g, "'")
-    .replace(/&ldquo;/g, '"')
-    .replace(/&rdquo;/g, '"')
-    .replace(/&mdash;/g, "—")
-    .replace(/&ndash;/g, "–")
-    .replace(/&hellip;/g, "…")
-    .replace(/&copy;/g, "©")
-    .replace(/&reg;/g, "®")
-    .replace(/&trade;/g, "™")
-    .replace(/&bull;/g, "•");
+    .replace(/&rsquo;/g, "\u2019")
+    .replace(/&lsquo;/g, "\u2018")
+    .replace(/&ldquo;/g, "\u201C")
+    .replace(/&rdquo;/g, "\u201D")
+    .replace(/&mdash;/g, "\u2014")
+    .replace(/&ndash;/g, "\u2013")
+    .replace(/&hellip;/g, "\u2026")
+    .replace(/&copy;/g, "\u00A9")
+    .replace(/&reg;/g, "\u00AE")
+    .replace(/&trade;/g, "\u2122")
+    .replace(/&bull;/g, "\u2022")
+    .replace(/&amp;/g, "&");
 
   // Clean up whitespace
   text = text

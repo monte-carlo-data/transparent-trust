@@ -2,11 +2,16 @@ import fs from "fs/promises";
 import matter from "gray-matter";
 
 export function createSlug(value: string): string {
-  return value
+  const slug = value
     .toLowerCase()
     .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+/, "").replace(/-+$/, "");
+    .replace(/[^a-z0-9]+/g, "-");
+  // Trim leading/trailing dashes one character at a time to avoid ReDoS
+  let start = 0;
+  let end = slug.length;
+  while (start < end && slug[start] === "-") start++;
+  while (end > start && slug[end - 1] === "-") end--;
+  return slug.slice(start, end);
 }
 
 export async function readFrontmatterFile(
