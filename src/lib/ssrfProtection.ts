@@ -49,6 +49,8 @@ export type SSRFValidationResult = {
   error?: string;
   resolvedIp?: string;
   originalHostname?: string;
+  /** Safe URL string with hostname replaced by resolved IP. Use this for fetch calls. */
+  safeUrl?: string;
 };
 
 /**
@@ -111,7 +113,7 @@ export async function validateUrlForSSRF(
     if (isBlockedIp(ip)) {
       return { valid: false, error: `Blocked IP address: ${ip}` };
     }
-    return { valid: true, resolvedIp: ip, originalHostname: hostname };
+    return { valid: true, resolvedIp: ip, originalHostname: hostname, safeUrl: parsed.toString() };
   }
 
   // DNS resolution check - catch domain -> private IP attacks
@@ -123,7 +125,10 @@ export async function validateUrlForSSRF(
         error: `Hostname resolves to blocked IP: ${address}`,
       };
     }
-    return { valid: true, resolvedIp: address, originalHostname: hostname };
+    // Build safe URL with resolved IP to prevent DNS rebinding
+    const safe = new URL(parsed.toString());
+    safe.hostname = address;
+    return { valid: true, resolvedIp: address, originalHostname: hostname, safeUrl: safe.toString() };
   } catch {
     // DNS resolution failed - reject the request to prevent DNS rebinding attacks
     // An attacker could use a domain that fails initial DNS but resolves later to an internal IP

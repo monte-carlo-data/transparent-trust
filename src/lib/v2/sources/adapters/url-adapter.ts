@@ -51,14 +51,12 @@ export class UrlDiscoveryAdapter extends BaseDiscoveryAdapter<UrlStagedSource> {
       throw new Error(`URL validation failed: ${ssrfCheck.error}`);
     }
 
-    // Build a safe URL from the validated result to prevent DNS rebinding.
-    const validatedUrl = new URL(url);
-    const originalHost = validatedUrl.hostname;
-    if (ssrfCheck.resolvedIp) {
-      validatedUrl.hostname = ssrfCheck.resolvedIp;
-    }
+    // Use the safe URL from SSRF validation (hostname replaced with resolved IP).
+    // This prevents DNS rebinding since we never re-resolve the user-provided hostname.
+    const fetchUrl = ssrfCheck.safeUrl!;
+    const originalHost = ssrfCheck.originalHostname!;
 
-    const response = await fetch(validatedUrl.toString(), {
+    const response = await fetch(fetchUrl, {
       headers: {
         'User-Agent': 'TransparentTrust/1.0 (Knowledge Base Crawler)',
         'Host': originalHost,

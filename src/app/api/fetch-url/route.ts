@@ -34,17 +34,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Build a safe URL from the validated result to prevent DNS rebinding.
-    // The SSRF validation already resolved the hostname to an IP and verified
-    // it is not internal. We fetch using that resolved IP with the original
-    // Host header so TLS and virtual-hosting still work.
-    const validatedUrl = new URL(url);
-    const originalHost = validatedUrl.hostname;
-    if (ssrfCheck.resolvedIp) {
-      validatedUrl.hostname = ssrfCheck.resolvedIp;
-    }
+    // Use the safe URL from SSRF validation (hostname replaced with resolved IP).
+    // This prevents DNS rebinding since we never re-resolve the user-provided hostname.
+    const fetchUrl = ssrfCheck.safeUrl!;
+    const originalHost = ssrfCheck.originalHostname!;
 
-    const response = await fetch(validatedUrl.toString(), {
+    const response = await fetch(fetchUrl, {
       headers: {
         "User-Agent": "GRC-Minion/1.0 (Security Questionnaire Assistant)",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7",
