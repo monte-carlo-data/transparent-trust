@@ -143,7 +143,7 @@ export async function cacheDeletePattern(pattern: string): Promise<void> {
   }
 
   // Also clean in-memory cache
-  const prefix = pattern.replace("*", "");
+  const prefix = pattern.replace(/\*/g, "");
   for (const key of inMemoryCache.keys()) {
     if (key.startsWith(prefix)) {
       inMemoryCache.delete(key);

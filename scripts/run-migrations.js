@@ -50,8 +50,8 @@ function configureSslWorkaround() {
   if (!process.env.PGSSLMODE) {
     process.env.PGSSLMODE = 'no-verify';
   }
-  if (!process.env.NODE_TLS_REJECT_UNAUTHORIZED) {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+    log('⚠ TLS certificate verification disabled via environment', 'yellow');
   }
 }
 
@@ -213,7 +213,12 @@ async function runPostMigrationScripts() {
   for (const script of postScripts) {
     log(`  Running: ${script.folder}/migration.post.ts`, 'blue');
     try {
-      execSync(`npx tsx ${JSON.stringify(script.path)}`, {
+      const resolvedPath = path.resolve(script.path);
+      if (!resolvedPath.startsWith(path.resolve(migrationsDir))) {
+        log(`  ✗ Skipping invalid path: ${script.path}`, 'red');
+        continue;
+      }
+      execSync(`npx tsx ${JSON.stringify(resolvedPath)}`, {
         stdio: 'inherit',
         env: process.env,
         cwd: path.join(__dirname, '..'),

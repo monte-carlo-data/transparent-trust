@@ -7,7 +7,10 @@ try {
   console.log('Running Prisma migrations...');
 
   // Use the Prisma CLI directly from node_modules
-  const prismaPath = path.join(__dirname, 'node_modules', '.bin', 'prisma');
+  const prismaPath = path.resolve(path.join(__dirname, 'node_modules', '.bin', 'prisma'));
+  if (!prismaPath.startsWith(path.resolve(__dirname))) {
+    throw new Error('Invalid prisma path');
+  }
 
   execSync(`${prismaPath} migrate deploy`, {
     stdio: 'inherit',

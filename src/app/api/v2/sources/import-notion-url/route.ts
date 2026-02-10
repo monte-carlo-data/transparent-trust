@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     // - https://www.notion.so/[workspace]/[page-id]
     // - https://www.notion.so/[page-id]
     // - [page-id] (just the ID)
-    const pageIdMatch = url.match(/(?:notion\.so\/)?(?:[a-zA-Z0-9]+(?::[a-zA-Z0-9]+)?\/)?([a-f0-9]{32})/i);
+    const pageIdMatch = url.match(/\b([a-f0-9]{32})\b/i);
     if (!pageIdMatch || !pageIdMatch[1]) {
       return NextResponse.json(
         { error: 'Invalid Notion URL. Please provide a valid Notion page URL or ID.' },

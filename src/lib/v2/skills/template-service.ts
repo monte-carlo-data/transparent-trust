@@ -174,7 +174,7 @@ export async function cloneFoundationalSkill(
         title: cloned.title,
       });
     } catch (error) {
-      console.error(`[TemplateService] Failed to clone to customer ${customerId}:`, error);
+      console.error('[TemplateService] Failed to clone to customer %s:', customerId, error);
       errors.push({
         customerId,
         error: error instanceof Error ? error.message : 'Unknown error',

@@ -89,7 +89,15 @@ export async function middleware(request: NextRequest) {
   if (pathname === "/auth/signin") {
     const iss = searchParams.get("iss");
     if (iss) {
-      const provider = iss.includes("okta.com") ? "okta" : "google";
+      let provider = "google";
+      try {
+        const issUrl = new URL(iss);
+        if (issUrl.hostname === "okta.com" || issUrl.hostname.endsWith(".okta.com")) {
+          provider = "okta";
+        }
+      } catch {
+        // Invalid URL, default to google
+      }
       const callbackUrl = searchParams.get("callbackUrl") || "/v2";
 
       const url = request.nextUrl.clone();

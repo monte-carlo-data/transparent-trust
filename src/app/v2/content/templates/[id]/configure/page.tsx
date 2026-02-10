@@ -473,7 +473,7 @@ export default function TemplateConfigurePage() {
                       asChild
                     >
                       <a
-                        href={`https://docs.google.com/presentation/d/${googleSlidesId}/edit`}
+                        href={`https://docs.google.com/presentation/d/${encodeURIComponent(googleSlidesId)}/edit`}
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Open in Google Slides"

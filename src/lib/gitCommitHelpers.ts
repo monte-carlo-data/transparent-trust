@@ -37,7 +37,7 @@ export async function hasStagedChanges(): Promise<boolean> {
 }
 
 function escapeCommitMessage(message: string): string {
-  return message.replace(/"/g, '\\"').replace(/\$/g, "\\$");
+  return message.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$");
 }
 
 export async function commitStagedChanges(

@@ -35,11 +35,11 @@ export async function POST(request: NextRequest) {
 
   try {
     // Use resolved IP to prevent DNS rebinding attacks
-    let fetchUrl = url;
+    const safeUrl = new URL(url);
     if (ssrfCheck.resolvedIp && ssrfCheck.originalHostname) {
-      const parsedUrl = new URL(url);
-      fetchUrl = url.replace(parsedUrl.hostname, ssrfCheck.resolvedIp);
+      safeUrl.hostname = ssrfCheck.resolvedIp;
     }
+    const fetchUrl = safeUrl.toString();
 
     const parsedUrl = new URL(url);
     const response = await fetch(fetchUrl, {
@@ -83,11 +83,16 @@ export async function POST(request: NextRequest) {
  * Removes scripts, styles, and HTML tags, preserves meaningful whitespace.
  */
 function extractTextFromHtml(html: string): string {
-  // Remove script and style elements
-  let text = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, "");
+  // Remove script and style elements (applied iteratively to handle nested tags)
+  let text = html;
+  let prev;
+  do {
+    prev = text;
+    text = text
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, "");
+  } while (text !== prev);
 
   // Replace common block elements with newlines
   text = text
@@ -104,6 +109,9 @@ function extractTextFromHtml(html: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
+    // Decode numeric entities first to avoid double-decoding
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&rsquo;/g, "'")
@@ -116,10 +124,7 @@ function extractTextFromHtml(html: string): string {
     .replace(/&copy;/g, "©")
     .replace(/&reg;/g, "®")
     .replace(/&trade;/g, "™")
-    .replace(/&bull;/g, "•")
-    // Decode numeric entities (decimal: &#123; and hex: &#x7B;)
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    .replace(/&bull;/g, "•");
 
   // Clean up whitespace
   text = text

@@ -336,7 +336,7 @@ export class NotionDiscoveryAdapter extends BaseDiscoveryAdapter<NotionStagedSou
         for (const row of rows) {
           if (row.table_row?.cells) {
             const cellTexts = row.table_row.cells.map((cell) =>
-              cell.map((t) => t.plain_text).join('').replace(/\|/g, '\\|').replace(/\n/g, ' ')
+              cell.map((t) => t.plain_text).join('').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ')
             );
             tableRows.push(cellTexts);
           }

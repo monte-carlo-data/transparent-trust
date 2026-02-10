@@ -209,7 +209,7 @@ export async function commitBlockChange(
   execSync(`git add "${gitPath}"`, { cwd: repoRoot });
 
   // Build commit command
-  let commitCmd = `git commit -m "${message.replace(/"/g, '\\"')}"`;
+  let commitCmd = `git commit -m "${message.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   if (author) {
     commitCmd += ` --author="${author.name} <${author.email}>"`;
   }
@@ -247,7 +247,7 @@ export async function commitBlockChanges(
   }
 
   // Build commit command
-  let commitCmd = `git commit -m "${message.replace(/"/g, '\\"')}"`;
+  let commitCmd = `git commit -m "${message.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   if (author) {
     commitCmd += ` --author="${author.name} <${author.email}>"`;
   }

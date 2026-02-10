@@ -114,11 +114,12 @@ async function fetchWebSearchResults(query: string): Promise<WebSearchResult[]> 
 
     try {
       // Use resolved IP to prevent DNS rebinding attacks
-      let fetchUrl = candidate.url;
       const parsedUrl = new URL(candidate.url);
+      const safeUrl = new URL(candidate.url);
       if (validation.resolvedIp && validation.originalHostname) {
-        fetchUrl = candidate.url.replace(parsedUrl.hostname, validation.resolvedIp);
+        safeUrl.hostname = validation.resolvedIp;
       }
+      const fetchUrl = safeUrl.toString();
 
       const contentResponse = await fetch(fetchUrl, {
         headers: {
@@ -164,10 +165,15 @@ async function fetchWebSearchResults(query: string): Promise<WebSearchResult[]> 
 }
 
 function extractTextFromHtml(html: string): string {
-  let text = html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-    .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, "");
+  let text = html;
+  let prev;
+  do {
+    prev = text;
+    text = text
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, "");
+  } while (text !== prev);
 
   text = text
     .replace(/<\/?(p|div|br|h[1-6]|li|tr|section|article|header|footer)[^>]*>/gi, "\n")
@@ -181,6 +187,8 @@ function extractTextFromHtml(html: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&rsquo;/g, "'")
@@ -193,9 +201,7 @@ function extractTextFromHtml(html: string): string {
     .replace(/&copy;/g, "©")
     .replace(/&reg;/g, "®")
     .replace(/&trade;/g, "™")
-    .replace(/&bull;/g, "•")
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    .replace(/&bull;/g, "•");
 
   return text
     .replace(/[ \t]+/g, " ")

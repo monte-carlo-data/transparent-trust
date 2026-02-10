@@ -6,7 +6,7 @@ export function createSlug(value: string): string {
     .toLowerCase()
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/^-+/, "").replace(/-+$/, "");
 }
 
 export async function readFrontmatterFile(

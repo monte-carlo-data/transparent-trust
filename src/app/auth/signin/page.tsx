@@ -70,7 +70,15 @@ function SignInContent() {
       queueMicrotask(() => {
         setAutoRedirecting(true);
         // Determine provider based on issuer domain
-        const provider = iss.includes("okta.com") ? "okta" : "google";
+        let provider = "google";
+        try {
+          const issUrl = new URL(iss);
+          if (issUrl.hostname === "okta.com" || issUrl.hostname.endsWith(".okta.com")) {
+            provider = "okta";
+          }
+        } catch {
+          // Invalid URL, default to google
+        }
         signIn(provider, { callbackUrl });
       });
     }

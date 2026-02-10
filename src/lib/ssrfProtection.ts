@@ -44,9 +44,6 @@ const BLOCKED_HOSTNAMES = [
   "kubernetes.default.svc",
 ];
 
-// Blocked URL schemes
-const BLOCKED_SCHEMES = ["file:", "ftp:", "gopher:", "data:", "javascript:"];
-
 export type SSRFValidationResult = {
   valid: boolean;
   error?: string;
@@ -90,11 +87,7 @@ export async function validateUrlForSSRF(
     return { valid: false, error: "Invalid URL format" };
   }
 
-  // Check scheme
-  if (BLOCKED_SCHEMES.includes(parsed.protocol)) {
-    return { valid: false, error: `Blocked URL scheme: ${parsed.protocol}` };
-  }
-
+  // Check scheme - only allow HTTP and HTTPS
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return { valid: false, error: `Only HTTP and HTTPS URLs are allowed` };
   }
@@ -151,10 +144,7 @@ export function quickValidateUrl(urlString: string): SSRFValidationResult {
     return { valid: false, error: "Invalid URL format" };
   }
 
-  if (BLOCKED_SCHEMES.includes(parsed.protocol)) {
-    return { valid: false, error: `Blocked URL scheme: ${parsed.protocol}` };
-  }
-
+  // Check scheme - only allow HTTP and HTTPS
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return { valid: false, error: `Only HTTP and HTTPS URLs are allowed` };
   }

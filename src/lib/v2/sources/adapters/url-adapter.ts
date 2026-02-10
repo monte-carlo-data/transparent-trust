@@ -12,6 +12,7 @@ import type {
   UrlStagedSource,
   UrlSourceMetadata,
 } from '@/types/v2';
+import { validateUrlForSSRF } from '@/lib/ssrfProtection';
 
 export class UrlDiscoveryAdapter extends BaseDiscoveryAdapter<UrlStagedSource> {
   readonly sourceType = 'url' as const;
@@ -45,6 +46,11 @@ export class UrlDiscoveryAdapter extends BaseDiscoveryAdapter<UrlStagedSource> {
    * For HTML, converts to plain text.
    */
   async fetchUrl(url: string): Promise<DiscoveredSource<UrlStagedSource>> {
+    const ssrfCheck = await validateUrlForSSRF(url);
+    if (!ssrfCheck.valid) {
+      throw new Error(`URL validation failed: ${ssrfCheck.error}`);
+    }
+
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'TransparentTrust/1.0 (Knowledge Base Crawler)',
@@ -160,13 +166,18 @@ export class UrlDiscoveryAdapter extends BaseDiscoveryAdapter<UrlStagedSource> {
       return '';
     }
 
-    // Remove script and style tags
-    let text = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-      .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
-      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '');
+    // Remove script and style tags (applied iteratively to handle nested tags)
+    let text = html;
+    let prev;
+    do {
+      prev = text;
+      text = text
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+        .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+        .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+        .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '');
+    } while (text !== prev);
 
     // Remove HTML tags
     text = text.replace(/<[^>]+>/g, ' ');

@@ -594,7 +594,7 @@ export function blocksToMarkdown(blocks: NotionBlock[]): string {
           for (const row of rows) {
             if (row.table_row?.cells) {
               const cellTexts = row.table_row.cells.map((cell) =>
-                richTextToPlain(cell).replace(/\|/g, "\\|").replace(/\n/g, " ")
+                richTextToPlain(cell).replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/\n/g, " ")
               );
               tableRows.push(cellTexts);
             }

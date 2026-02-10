@@ -7,7 +7,10 @@ try {
   console.log('Initializing database...');
 
   // Use prisma db push to create all tables including _prisma_migrations
-  const prismaPath = path.join(__dirname, 'node_modules', '.bin', 'prisma');
+  const prismaPath = path.resolve(path.join(__dirname, 'node_modules', '.bin', 'prisma'));
+  if (!prismaPath.startsWith(path.resolve(__dirname))) {
+    throw new Error('Invalid prisma path');
+  }
 
   console.log('Pushing schema to database...');
   execSync(`${prismaPath} db push --skip-generate`, {

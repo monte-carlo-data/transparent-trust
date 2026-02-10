@@ -82,7 +82,7 @@ function validateCustomerInput(
  * Basic email validation
  */
 function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{1,63}$/.test(email);
 }
 
 /**

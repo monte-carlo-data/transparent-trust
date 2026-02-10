@@ -147,7 +147,7 @@ export async function listPresentations(
   // Build query for Google Slides files
   let q = "mimeType='application/vnd.google-apps.presentation'";
   if (query) {
-    q += ` and name contains '${query.replace(/'/g, "\\'")}'`;
+    q += ` and name contains '${query.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
   }
 
   const params = new URLSearchParams({
@@ -181,6 +181,10 @@ export async function getPresentation(
   const accessToken = await getAccessToken(userId);
   if (!accessToken) {
     throw new Error("No valid Google access token");
+  }
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(presentationId)) {
+    throw new Error("Invalid presentation ID format");
   }
 
   const response = await fetch(`${SLIDES_API_BASE}/presentations/${presentationId}`, {
@@ -242,6 +246,10 @@ export async function fillPresentation(
   const accessToken = await getAccessToken(userId);
   if (!accessToken) {
     throw new Error("No valid Google access token");
+  }
+
+  if (!/^[a-zA-Z0-9_-]+$/.test(presentationId)) {
+    throw new Error("Invalid presentation ID format");
   }
 
   let targetPresentationId = presentationId;
