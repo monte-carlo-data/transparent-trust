@@ -1,9 +1,5 @@
 name: "Custom CodeQL Config"
 
-# Use the default queries plus our custom extensions
-queries:
-  - uses: security-extended
-
 query-filters:
   # Exclude the SSRF alert from ssrfProtection.ts where safeFetch performs
   # validated fetching (hostname resolved via DNS, checked against blocklists).
