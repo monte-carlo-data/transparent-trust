@@ -12,7 +12,7 @@ import type {
   UrlStagedSource,
   UrlSourceMetadata,
 } from '@/types/v2';
-import { validateUrlForSSRF } from '@/lib/ssrfProtection';
+import { safeFetch } from '@/lib/ssrfProtection';
 
 export class UrlDiscoveryAdapter extends BaseDiscoveryAdapter<UrlStagedSource> {
   readonly sourceType = 'url' as const;
@@ -46,20 +46,10 @@ export class UrlDiscoveryAdapter extends BaseDiscoveryAdapter<UrlStagedSource> {
    * For HTML, converts to plain text.
    */
   async fetchUrl(url: string): Promise<DiscoveredSource<UrlStagedSource>> {
-    const ssrfCheck = await validateUrlForSSRF(url);
-    if (!ssrfCheck.valid) {
-      throw new Error(`URL validation failed: ${ssrfCheck.error}`);
-    }
-
-    // Use the safe URL from SSRF validation (hostname replaced with resolved IP).
-    // This prevents DNS rebinding since we never re-resolve the user-provided hostname.
-    const fetchUrl = ssrfCheck.safeUrl!;
-    const originalHost = ssrfCheck.originalHostname!;
-
-    const response = await fetch(fetchUrl, {
+    // safeFetch validates the URL against SSRF and fetches using the resolved IP
+    const { response } = await safeFetch(url, {
       headers: {
         'User-Agent': 'TransparentTrust/1.0 (Knowledge Base Crawler)',
-        'Host': originalHost,
       },
     });
 

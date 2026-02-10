@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { validateUrlForSSRF } from "@/lib/ssrfProtection";
+import { safeFetch } from "@/lib/ssrfProtection";
 import { apiSuccess, errors } from "@/lib/apiResponse";
 import { logger } from "@/lib/logger";
 
@@ -12,7 +12,7 @@ type FetchUrlRequest = {
 /**
  * Server-side URL fetcher to avoid CORS issues.
  * Fetches a URL and extracts readable text content.
- * Protected against SSRF attacks.
+ * Protected against SSRF attacks via safeFetch.
  */
 export async function POST(request: NextRequest) {
   let body: FetchUrlRequest;
@@ -27,23 +27,12 @@ export async function POST(request: NextRequest) {
     return errors.badRequest("URL is required");
   }
 
-  // Validate URL for SSRF vulnerabilities
-  const ssrfCheck = await validateUrlForSSRF(url);
-  if (!ssrfCheck.valid) {
-    return errors.badRequest(ssrfCheck.error || "URL validation failed");
-  }
-
   try {
-    // Use the safe URL from SSRF validation (hostname replaced with resolved IP).
-    // This prevents DNS rebinding since we never re-resolve the user-provided hostname.
-    const fetchUrl = ssrfCheck.safeUrl!;
-    const originalHost = ssrfCheck.originalHostname!;
-
-    const response = await fetch(fetchUrl, {
+    // safeFetch validates the URL against SSRF and fetches using the resolved IP
+    const { response } = await safeFetch(url, {
       headers: {
         "User-Agent": "GRC-Minion/1.0 (Security Questionnaire Assistant)",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7",
-        "Host": originalHost,
       },
       signal: AbortSignal.timeout(15000), // 15 second timeout
     });

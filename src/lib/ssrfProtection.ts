@@ -106,6 +106,13 @@ export async function validateUrlForSSRF(
     return { valid: false, error: `Blocked hostname: ${hostname}` };
   }
 
+  // Extract validated components for building safe URL
+  const protocol = parsed.protocol; // already validated as http: or https:
+  const port = parsed.port;
+  const pathname = parsed.pathname;
+  const search = parsed.search;
+  const hash = parsed.hash;
+
   // Check if hostname is already an IP
   if (/^[\d.]+$/.test(hostname) || hostname.startsWith("[")) {
     // IPv4 or IPv6 literal
@@ -113,7 +120,13 @@ export async function validateUrlForSSRF(
     if (isBlockedIp(ip)) {
       return { valid: false, error: `Blocked IP address: ${ip}` };
     }
-    return { valid: true, resolvedIp: ip, originalHostname: hostname, safeUrl: parsed.toString() };
+    const portSuffix = port ? `:${port}` : "";
+    return {
+      valid: true,
+      resolvedIp: ip,
+      originalHostname: hostname,
+      safeUrl: `${protocol}//${hostname}${portSuffix}${pathname}${search}${hash}`,
+    };
   }
 
   // DNS resolution check - catch domain -> private IP attacks
@@ -125,15 +138,38 @@ export async function validateUrlForSSRF(
         error: `Hostname resolves to blocked IP: ${address}`,
       };
     }
-    // Build safe URL with resolved IP to prevent DNS rebinding
-    const safe = new URL(parsed.toString());
-    safe.hostname = address;
-    return { valid: true, resolvedIp: address, originalHostname: hostname, safeUrl: safe.toString() };
+    // Build safe URL from scratch using resolved IP (not derived from user input)
+    const portSuffix = port ? `:${port}` : "";
+    const safeUrl = `${protocol}//${address}${portSuffix}${pathname}${search}${hash}`;
+    return { valid: true, resolvedIp: address, originalHostname: hostname, safeUrl };
   } catch {
     // DNS resolution failed - reject the request to prevent DNS rebinding attacks
     // An attacker could use a domain that fails initial DNS but resolves later to an internal IP
     return { valid: false, error: "DNS resolution failed for hostname" };
   }
+}
+
+/**
+ * Validate a URL and fetch it safely, preventing SSRF attacks.
+ * This combines validation and fetching in one function so the fetch
+ * only occurs with a validated URL.
+ */
+export async function safeFetch(
+  urlString: string,
+  init?: RequestInit
+): Promise<{ response: Response; originalHostname: string }> {
+  const result = await validateUrlForSSRF(urlString);
+  if (!result.valid) {
+    throw new Error(result.error || "URL validation failed");
+  }
+  const response = await fetch(result.safeUrl!, {
+    ...init,
+    headers: {
+      ...init?.headers,
+      Host: result.originalHostname!,
+    },
+  });
+  return { response, originalHostname: result.originalHostname! };
 }
 
 /**
