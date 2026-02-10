@@ -151,25 +151,67 @@ export async function validateUrlForSSRF(
 
 /**
  * Validate a URL and fetch it safely, preventing SSRF attacks.
- * This combines validation and fetching in one function so the fetch
- * only occurs with a validated URL.
+ * All validation and URL construction is inlined so that static analysis
+ * can verify the fetch target is safe without cross-function taint propagation.
  */
 export async function safeFetch(
   urlString: string,
   init?: RequestInit
 ): Promise<{ response: Response; originalHostname: string }> {
-  const result = await validateUrlForSSRF(urlString);
-  if (!result.valid) {
-    throw new Error(result.error || "URL validation failed");
+  // --- inline validation (mirrors validateUrlForSSRF) ---
+  let parsed: URL;
+  try {
+    parsed = new URL(urlString);
+  } catch {
+    throw new Error("Invalid URL format");
   }
-  const response = await fetch(result.safeUrl!, {
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Only HTTP and HTTPS URLs are allowed");
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("URLs with credentials are not allowed");
+  }
+
+  const hostname = parsed.hostname;
+  if (isBlockedHostname(hostname)) {
+    throw new Error(`Blocked hostname: ${hostname}`);
+  }
+
+  let resolvedHost: string;
+
+  if (/^[\d.]+$/.test(hostname) || hostname.startsWith("[")) {
+    const ip = hostname.replace(/^\[|\]$/g, "");
+    if (isBlockedIp(ip)) {
+      throw new Error(`Blocked IP address: ${ip}`);
+    }
+    resolvedHost = hostname;
+  } else {
+    let address: string;
+    try {
+      const lookup = await dnsLookup(hostname);
+      address = lookup.address;
+    } catch {
+      throw new Error("DNS resolution failed for hostname");
+    }
+    if (isBlockedIp(address)) {
+      throw new Error(`Hostname resolves to blocked IP: ${address}`);
+    }
+    resolvedHost = address;
+  }
+
+  // Build fetch URL from validated components
+  const port = parsed.port ? `:${parsed.port}` : "";
+  const target = `${parsed.protocol}//${resolvedHost}${port}${parsed.pathname}${parsed.search}${parsed.hash}`;
+
+  const response = await fetch(target, {
     ...init,
     headers: {
       ...init?.headers,
-      Host: result.originalHostname!,
+      Host: hostname,
     },
   });
-  return { response, originalHostname: result.originalHostname! };
+  return { response, originalHostname: hostname };
 }
 
 /**
