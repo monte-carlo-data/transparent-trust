@@ -1,0 +1,451 @@
+@import "tailwindcss";
+
+:root {
+  /* === Core Theme Colors === */
+  --background: #ffffff;
+  --foreground: #0f172a;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f1f5f9;
+  --secondary-foreground: #0f172a;
+
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+
+  --accent: #f1f5f9;
+  --accent-foreground: #0f172a;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+
+  --border: #e2e8f0;
+  --input: #e2e8f0;
+  --ring: #6366f1;
+
+  --radius: 0.5rem;
+
+  /* === Text Hierarchy === */
+  --text-heading: #1e293b;
+  --text-body: #475569;
+  --text-tertiary: #94a3b8;
+
+  /* === Surface Layers === */
+  --surface: #f8fafc;
+  --surface-secondary: #f1f5f9;
+
+  /* === Border Variations === */
+  --border-subtle: #f1f5f9;
+  --border-medium: #cbd5e1;
+
+  /* === Status Colors === */
+  --success: #10b981;
+  --success-foreground: #ffffff;
+  --success-bg: #dcfce7;
+  --success-border: #bbf7d0;
+  --success-text: #166534;
+
+  --warning: #f59e0b;
+  --warning-foreground: #ffffff;
+  --warning-bg: #fef3c7;
+  --warning-border: #fde68a;
+  --warning-text: #92400e;
+
+  --info: #3b82f6;
+  --info-foreground: #ffffff;
+  --info-bg: #dbeafe;
+  --info-border: #bfdbfe;
+  --info-text: #1e40af;
+
+  /* === Destructive Extended === */
+  --destructive-bg: #fee2e2;
+  --destructive-border: #fecaca;
+  --destructive-text: #b91c1c;
+
+  /* === Library Accent Colors === */
+  --accent-blue: #2563eb;
+  --accent-blue-light: #dbeafe;
+  --accent-purple: #9333ea;
+  --accent-purple-light: #faf5ff;
+  --accent-green: #16a34a;
+  --accent-green-light: #dcfce7;
+  --accent-amber: #d97706;
+  --accent-amber-light: #fef3c7;
+  --accent-orange: #f97316;
+  --accent-orange-light: #fff7ed;
+  --accent-pink: #ec4899;
+  --accent-pink-light: #fdf2f8;
+  --accent-teal: #14b8a6;
+  --accent-teal-light: #f0fdfa;
+  --accent-indigo: #6366f1;
+  --accent-indigo-light: #eef2ff;
+
+  /* === Domain Colors === */
+  --domain-technical: #0369a1;
+  --domain-technical-bg: #e0f2fe;
+  --domain-legal: #7c3aed;
+  --domain-legal-bg: #ede9fe;
+  --domain-security: #b45309;
+  --domain-security-bg: #fef3c7;
+
+  /* === Confidence Levels === */
+  --confidence-high: #16a34a;
+  --confidence-medium: #eab308;
+  --confidence-low: #dc2626;
+  --confidence-unable: #7c3aed;
+  --confidence-unknown: #94a3b8;
+
+  /* === Entity Type Colors === */
+  --entity-skill: #0ea5e9;
+  --entity-customer: #8b5cf6;
+  --entity-project: #f97316;
+  --entity-document: #10b981;
+  --entity-url: #6366f1;
+  --entity-contract: #ec4899;
+  --entity-user: #64748b;
+  --entity-prompt: #f59e0b;
+  --entity-snippet: #84cc16;
+  --entity-answer: #14b8a6;
+
+  /* === Sidebar (Always Dark) === */
+  --sidebar-background: #1e293b;
+  --sidebar-foreground: #f1f5f9;
+  --sidebar-muted: #94a3b8;
+  --sidebar-border: #334155;
+  --sidebar-hover: #334155;
+  --sidebar-active: #475569;
+}
+
+@theme inline {
+  /* Core Theme */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Radius */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Fonts */
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  /* Text Hierarchy */
+  --color-text-heading: var(--text-heading);
+  --color-text-body: var(--text-body);
+  --color-text-tertiary: var(--text-tertiary);
+
+  /* Surfaces */
+  --color-surface: var(--surface);
+  --color-surface-secondary: var(--surface-secondary);
+
+  /* Border Variations */
+  --color-border-subtle: var(--border-subtle);
+  --color-border-medium: var(--border-medium);
+
+  /* Status Colors */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-bg: var(--success-bg);
+  --color-success-border: var(--success-border);
+  --color-success-text: var(--success-text);
+
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-border: var(--warning-border);
+  --color-warning-text: var(--warning-text);
+
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-bg: var(--info-bg);
+  --color-info-border: var(--info-border);
+  --color-info-text: var(--info-text);
+
+  --color-destructive-bg: var(--destructive-bg);
+  --color-destructive-border: var(--destructive-border);
+  --color-destructive-text: var(--destructive-text);
+
+  /* Library Accents */
+  --color-accent-blue: var(--accent-blue);
+  --color-accent-blue-light: var(--accent-blue-light);
+  --color-accent-purple: var(--accent-purple);
+  --color-accent-purple-light: var(--accent-purple-light);
+  --color-accent-green: var(--accent-green);
+  --color-accent-green-light: var(--accent-green-light);
+  --color-accent-amber: var(--accent-amber);
+  --color-accent-amber-light: var(--accent-amber-light);
+  --color-accent-orange: var(--accent-orange);
+  --color-accent-orange-light: var(--accent-orange-light);
+  --color-accent-pink: var(--accent-pink);
+  --color-accent-pink-light: var(--accent-pink-light);
+  --color-accent-teal: var(--accent-teal);
+  --color-accent-teal-light: var(--accent-teal-light);
+  --color-accent-indigo: var(--accent-indigo);
+  --color-accent-indigo-light: var(--accent-indigo-light);
+
+  /* Domain Colors */
+  --color-domain-technical: var(--domain-technical);
+  --color-domain-technical-bg: var(--domain-technical-bg);
+  --color-domain-legal: var(--domain-legal);
+  --color-domain-legal-bg: var(--domain-legal-bg);
+  --color-domain-security: var(--domain-security);
+  --color-domain-security-bg: var(--domain-security-bg);
+
+  /* Confidence Levels */
+  --color-confidence-high: var(--confidence-high);
+  --color-confidence-medium: var(--confidence-medium);
+  --color-confidence-low: var(--confidence-low);
+  --color-confidence-unable: var(--confidence-unable);
+  --color-confidence-unknown: var(--confidence-unknown);
+
+  /* Entity Types */
+  --color-entity-skill: var(--entity-skill);
+  --color-entity-customer: var(--entity-customer);
+  --color-entity-project: var(--entity-project);
+  --color-entity-document: var(--entity-document);
+  --color-entity-url: var(--entity-url);
+  --color-entity-contract: var(--entity-contract);
+  --color-entity-user: var(--entity-user);
+  --color-entity-prompt: var(--entity-prompt);
+  --color-entity-snippet: var(--entity-snippet);
+  --color-entity-answer: var(--entity-answer);
+
+  /* Sidebar */
+  --color-sidebar-background: var(--sidebar-background);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-active: var(--sidebar-active);
+}
+
+/* Dark mode - class-based (manual toggle) */
+.dark {
+  /* Core Theme */
+  --background: #0f172a;
+  --foreground: #f8fafc;
+
+  --card: #1e293b;
+  --card-foreground: #f8fafc;
+
+  --popover: #1e293b;
+  --popover-foreground: #f8fafc;
+
+  --primary: #818cf8;
+  --primary-foreground: #0f172a;
+
+  --secondary: #334155;
+  --secondary-foreground: #f8fafc;
+
+  --muted: #334155;
+  --muted-foreground: #94a3b8;
+
+  --accent: #334155;
+  --accent-foreground: #f8fafc;
+
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+
+  --border: #334155;
+  --input: #334155;
+  --ring: #818cf8;
+
+  /* Text Hierarchy */
+  --text-heading: #f8fafc;
+  --text-body: #cbd5e1;
+  --text-tertiary: #64748b;
+
+  /* Surface Layers */
+  --surface: #1e293b;
+  --surface-secondary: #334155;
+
+  /* Border Variations */
+  --border-subtle: #334155;
+  --border-medium: #475569;
+
+  /* Status Colors - Dark Mode */
+  --success-bg: #064e3b;
+  --success-border: #065f46;
+  --success-text: #6ee7b7;
+
+  --warning-bg: #78350f;
+  --warning-border: #92400e;
+  --warning-text: #fcd34d;
+
+  --info-bg: #1e3a8a;
+  --info-border: #1e40af;
+  --info-text: #93c5fd;
+
+  --destructive-bg: #7f1d1d;
+  --destructive-border: #991b1b;
+  --destructive-text: #fca5a5;
+
+  /* Library Accents - Brighter for Dark Mode */
+  --accent-blue: #3b82f6;
+  --accent-blue-light: #1e3a8a;
+  --accent-purple: #a855f7;
+  --accent-purple-light: #581c87;
+  --accent-green: #22c55e;
+  --accent-green-light: #166534;
+  --accent-amber: #f59e0b;
+  --accent-amber-light: #78350f;
+  --accent-orange: #fb923c;
+  --accent-orange-light: #7c2d12;
+  --accent-pink: #f472b6;
+  --accent-pink-light: #831843;
+  --accent-teal: #2dd4bf;
+  --accent-teal-light: #134e4a;
+  --accent-indigo: #818cf8;
+  --accent-indigo-light: #3730a3;
+
+  /* Domain Colors - Dark Mode */
+  --domain-technical-bg: #0c4a6e;
+  --domain-legal-bg: #4c1d95;
+  --domain-security-bg: #78350f;
+
+  /* Entity Types - Brighter for Dark Mode */
+  --entity-skill: #38bdf8;
+  --entity-customer: #a78bfa;
+  --entity-project: #fb923c;
+  --entity-document: #34d399;
+  --entity-url: #818cf8;
+  --entity-contract: #f472b6;
+}
+
+/* Dark mode - system preference (when not manually overridden) */
+@media (prefers-color-scheme: dark) {
+  html:not(.light) {
+    /* Core Theme */
+    --background: #0f172a;
+    --foreground: #f8fafc;
+
+    --card: #1e293b;
+    --card-foreground: #f8fafc;
+
+    --popover: #1e293b;
+    --popover-foreground: #f8fafc;
+
+    --primary: #818cf8;
+    --primary-foreground: #0f172a;
+
+    --secondary: #334155;
+    --secondary-foreground: #f8fafc;
+
+    --muted: #334155;
+    --muted-foreground: #94a3b8;
+
+    --accent: #334155;
+    --accent-foreground: #f8fafc;
+
+    --destructive: #dc2626;
+    --destructive-foreground: #ffffff;
+
+    --border: #334155;
+    --input: #334155;
+    --ring: #818cf8;
+
+    /* Text Hierarchy */
+    --text-heading: #f8fafc;
+    --text-body: #cbd5e1;
+    --text-tertiary: #64748b;
+
+    /* Surface Layers */
+    --surface: #1e293b;
+    --surface-secondary: #334155;
+
+    /* Border Variations */
+    --border-subtle: #334155;
+    --border-medium: #475569;
+
+    /* Status Colors - Dark Mode */
+    --success-bg: #064e3b;
+    --success-border: #065f46;
+    --success-text: #6ee7b7;
+
+    --warning-bg: #78350f;
+    --warning-border: #92400e;
+    --warning-text: #fcd34d;
+
+    --info-bg: #1e3a8a;
+    --info-border: #1e40af;
+    --info-text: #93c5fd;
+
+    --destructive-bg: #7f1d1d;
+    --destructive-border: #991b1b;
+    --destructive-text: #fca5a5;
+
+    /* Library Accents - Brighter for Dark Mode */
+    --accent-blue: #3b82f6;
+    --accent-blue-light: #1e3a8a;
+    --accent-purple: #a855f7;
+    --accent-purple-light: #581c87;
+    --accent-green: #22c55e;
+    --accent-green-light: #166534;
+    --accent-amber: #f59e0b;
+    --accent-amber-light: #78350f;
+    --accent-orange: #fb923c;
+    --accent-orange-light: #7c2d12;
+    --accent-pink: #f472b6;
+    --accent-pink-light: #831843;
+    --accent-teal: #2dd4bf;
+    --accent-teal-light: #134e4a;
+    --accent-indigo: #818cf8;
+    --accent-indigo-light: #3730a3;
+
+    /* Domain Colors - Dark Mode */
+    --domain-technical-bg: #0c4a6e;
+    --domain-legal-bg: #4c1d95;
+    --domain-security-bg: #78350f;
+
+    /* Entity Types - Brighter for Dark Mode */
+    --entity-skill: #38bdf8;
+    --entity-customer: #a78bfa;
+    --entity-project: #fb923c;
+    --entity-document: #34d399;
+    --entity-url: #818cf8;
+    --entity-contract: #f472b6;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Animation utilities */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}

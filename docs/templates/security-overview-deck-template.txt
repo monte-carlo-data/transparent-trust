@@ -1,0 +1,168 @@
+# Security Overview Deck Template
+
+Instructions: Select this template along with relevant skills and a customer profile, then ask the chat to "Complete this deck template for [Customer Name]"
+
+---
+
+## Slide 1: Title Slide
+
+**[COMPANY NAME] Security Overview**
+
+Prepared for: [CUSTOMER NAME]
+Date: [DATE]
+
+---
+
+## Slide 2: Executive Summary
+
+[2-3 sentences summarizing the company's security posture and key differentiators]
+
+Key Highlights:
+- [Primary security certification or compliance]
+- [Key security capability]
+- [Trust/reliability statement]
+
+---
+
+## Slide 3: Compliance & Certifications
+
+Current Certifications:
+- [List all certifications: SOC 2 Type II, ISO 27001, HIPAA, etc.]
+
+Audit Status:
+- [Most recent audit date and scope]
+- [Audit frequency]
+
+Compliance Frameworks:
+- [List frameworks followed: NIST, CIS, etc.]
+
+---
+
+## Slide 4: Data Protection
+
+Encryption:
+- Data at rest: [Encryption standard and key management]
+- Data in transit: [TLS version, certificate management]
+
+Data Residency:
+- [Available regions/locations]
+- [Data sovereignty options]
+
+Data Retention & Deletion:
+- [Retention policies]
+- [Customer data deletion process]
+
+---
+
+## Slide 5: Access Controls
+
+Authentication:
+- [SSO support: SAML, OIDC providers]
+- [MFA options and enforcement]
+
+Authorization:
+- [RBAC/permission model]
+- [Admin controls available]
+
+Session Management:
+- [Session timeout policies]
+- [Concurrent session handling]
+
+---
+
+## Slide 6: Infrastructure Security
+
+Cloud Infrastructure:
+- [Cloud provider(s) and regions]
+- [Infrastructure certifications]
+
+Network Security:
+- [Firewall, WAF, DDoS protection]
+- [Network segmentation approach]
+
+Monitoring & Detection:
+- [SIEM, intrusion detection]
+- [24/7 monitoring capabilities]
+
+---
+
+## Slide 7: Incident Response
+
+Response Process:
+- [Incident classification levels]
+- [Response time SLAs]
+
+Communication:
+- [Customer notification timeline]
+- [Status page or communication channels]
+
+Post-Incident:
+- [Root cause analysis process]
+- [Remediation tracking]
+
+---
+
+## Slide 8: Business Continuity
+
+Availability:
+- [SLA commitment: 99.9%, 99.99%, etc.]
+- [Historical uptime]
+
+Disaster Recovery:
+- [RPO and RTO targets]
+- [Backup frequency and retention]
+- [Geographic redundancy]
+
+---
+
+## Slide 9: Vendor & Third-Party Risk
+
+Vendor Assessment:
+- [How vendors are evaluated]
+- [Security requirements for vendors]
+
+Subprocessors:
+- [Key subprocessors and their purpose]
+- [Subprocessor notification process]
+
+---
+
+## Slide 10: Security Culture & Training
+
+Employee Security:
+- [Background check policy]
+- [Security training frequency]
+- [Phishing awareness program]
+
+Security Team:
+- [Dedicated security team size/structure]
+- [Key security leadership]
+
+---
+
+## Slide 11: Customer-Specific Considerations
+
+[Based on customer profile, address specific concerns:]
+
+Industry Requirements:
+- [How we address their industry-specific compliance needs]
+
+Integration Points:
+- [Relevant integrations for their tech stack]
+
+Support Model:
+- [Support tiers and response times]
+- [Dedicated support options]
+
+---
+
+## Slide 12: Next Steps
+
+1. [Recommended next step: security review call, documentation access, etc.]
+2. [Timeline for any pending items]
+3. [Contact information for security team]
+
+Resources:
+- Trust Center: [URL]
+- Security Documentation: [URL]
+- Contact: [security team email]

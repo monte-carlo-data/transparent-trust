@@ -1,0 +1,9 @@
+export const SKILL_PROMPT_STORAGE_KEY = "grc-minion-skill-prompt";
+export const QUESTION_PROMPT_STORAGE_KEY = "grc-minion-question-prompt";
+export const QUESTION_PROMPT_SECTIONS_KEY = "grc-minion-question-prompt-sections";
+export const SKILL_PROMPT_SECTIONS_KEY = "grc-minion-skill-prompt-sections";
+export const CHAT_PROMPT_STORAGE_KEY = "grc-minion-chat-system-prompt";
+export const CHAT_PROMPT_SECTIONS_KEY = "grc-minion-chat-prompt-sections";
+export const LIBRARY_ANALYSIS_SECTIONS_KEY = "grc-minion-library-analysis-sections";
+export const PROMPT_VERSION_KEY = "grc-minion-prompt-version";
+export const CURRENT_PROMPT_VERSION = "8"; // Increment this when prompt format changes - v8 adds Library Analysis prompt

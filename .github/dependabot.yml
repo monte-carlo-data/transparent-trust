@@ -1,17 +1,34 @@
 version: 2
 updates:
+  # NPM dependencies
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
     open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
     labels:
       - "dependencies"
+      - "automated"
+    # Group minor/patch updates to reduce PR noise
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+      day: "monday"
+    commit-message:
+      prefix: "ci"
     labels:
-      - "dependencies"
+      - "ci"
+      - "automated"

@@ -1,0 +1,841 @@
+// Transparent Trust Platform V2 Schema
+// Unified BuildingBlock architecture for scaling to 200+ users
+//
+// Core concept: Knowledge (brain) + Personas (outfit) + Templates (action) = AI Output
+//
+// Migration note: This is a clean slate schema. Previous data will not migrate automatically.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTHENTICATION & USER MANAGEMENT
+// ============================================================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model User {
+  id              String    @id @default(cuid())
+  name            String?
+  email           String?   @unique
+  emailVerified   DateTime?
+  image           String?
+  accounts        Account[]
+  sessions        Session[]
+  teamMemberships TeamMembership[]
+
+  // User preferences stored as JSON for flexibility
+  preferences     Json      @default("{}")
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([email])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================================================
+// TEAM STRUCTURE (Ownership boundaries for 200+ users)
+// ============================================================================
+
+model Team {
+  id                 String   @id @default(cuid())
+  name               String
+  slug               String   @unique
+  description        String?
+
+  // Which libraries this team owns/manages
+  // Valid values: "knowledge", "it", "gtm", "talent", "prompts"
+  libraries          String[]
+
+  // Usage limits
+  monthlyTokenLimit  Int?
+  currentMonthTokens Int      @default(0)
+
+  // Team settings as JSON for flexibility
+  settings           Json     @default("{}")
+
+  members            TeamMembership[]
+  blocks             BuildingBlock[]
+  customers          Customer[]
+  bulkProjects       BulkProject[]
+  chatSessions       ChatSession[]
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([slug])
+}
+
+model TeamMembership {
+  id        String   @id @default(cuid())
+  userId    String
+  teamId    String
+  role      String   @default("member") // 'admin', 'member', 'viewer'
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, teamId])
+  @@index([userId])
+  @@index([teamId])
+}
+
+// ============================================================================
+// CUSTOMERS (First-class entities - own skill libraries)
+// ============================================================================
+
+model Customer {
+  id              String   @id @default(cuid())
+
+  // === Identity ===
+  slug            String?  @unique  // URL-friendly identifier
+  company         String
+
+  // === Profile Data ===
+  industry        String?
+  tier            String?  // 'enterprise' | 'mid-market' | 'smb'
+  healthScore     Int?
+  crmId           String?  @unique // Salesforce or CRM ID
+
+  // === Contacts & Products ===
+  contacts        Json     @default("[]")  // Array of { name, role, email }
+  products        String[] // Products/features they use
+
+  // === Content ===
+  summary         String?  @db.Text
+  notes           String?  @db.Text
+
+  // === Ownership ===
+  teamId          String?
+  team            Team?    @relation(fields: [teamId], references: [id])
+  ownerId         String?  // User who created/owns this customer
+
+  // === Status ===
+  isActive        Boolean  @default(true)
+  status          String   @default("ACTIVE") // 'ACTIVE', 'CHURNED', 'PROSPECT'
+
+  // === Timestamps ===
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // === Relations ===
+  skills          BuildingBlock[] @relation("CustomerSkills")
+  stagedSources   StagedSource[]
+  generatedViews  GeneratedView[]
+  projects        BulkProject[]   @relation("CustomerProjects")
+  chatSessions    ChatSession[]   @relation("CustomerChatSessions")
+
+  @@index([teamId])
+  @@index([ownerId])
+  @@index([crmId])
+  @@index([status])
+}
+
+// ============================================================================
+// UNIFIED BUILDING BLOCKS (The heart of Platform V2)
+// ============================================================================
+//
+// BuildingBlock is the unified model for all content types:
+// - blockType: 'knowledge' | 'persona' | 'template'
+// - libraryId: 'knowledge', 'it', 'gtm', 'prompts'
+// - For global skills: libraryId determines library, customerId is null
+// - For customer skills: customerId links to customer, libraryId is null
+// - entryType: Sub-classification (used for prompts: 'block', 'persona', 'template', 'view')
+//
+// The `attributes` JSON field holds type-specific data without schema migrations
+
+model BuildingBlock {
+  id          String   @id @default(cuid())
+
+  // === Type Classification ===
+  blockType   String   // 'knowledge' | 'persona' | 'template'
+  libraryId   String   // Which library this belongs to
+  skillType   String   @default("knowledge") // 'knowledge' | 'intelligence' - content structure type
+  entryType   String?  // Optional sub-classification
+
+  // === Content ===
+  slug        String?  // URL-friendly identifier for lookup
+  title       String
+  content     String   @db.Text // Main content body
+  summary     String?  @db.Text // Optional summary/preview
+  categories  String[] // Freeform categorization
+
+  // === Flexible Attributes ===
+  // Type-specific fields stored as JSON - no migrations needed for new fields
+  attributes  Json     @default("{}")
+
+  // === Ownership ===
+  teamId      String?
+  team        Team?    @relation(fields: [teamId], references: [id])
+  ownerId     String?  // User who created/owns this block
+  customerId  String?  // For customer-scoped skills (links to Customer table)
+  customer    Customer? @relation("CustomerSkills", fields: [customerId], references: [id])
+
+  // === Status & Lifecycle ===
+  status      String   @default("ACTIVE") // 'ACTIVE', 'ARCHIVED'
+  version     Int      @default(1)
+
+  // === Git Sync ===
+  gitPath       String?   // Path in git repo
+  gitCommitSha  String?   // Last synced commit
+  syncStatus    String    @default("SYNCED") // 'SYNCED', 'LOCAL_CHANGES', 'CONFLICT'
+  lastSyncedAt  DateTime?
+
+  // === Timestamps ===
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // === Relations ===
+  assignments SourceAssignment[]
+  usageInChats ChatBlockUsage[]
+
+  // Unique constraint includes customerId so each customer can have their own slugs
+  // For global skills (customerId=null): unique by [libraryId, slug]
+  // For customer skills (libraryId='customers'): unique by [customerId, slug]
+  @@unique([libraryId, customerId, slug])
+  @@index([blockType, libraryId, status])
+  @@index([skillType])
+  @@index([libraryId, skillType])
+  @@index([teamId])
+  @@index([ownerId])
+  @@index([customerId])
+  @@index([categories])
+}
+
+// ============================================================================
+// SOURCE STAGING LAYER (Inbox for external content)
+// ============================================================================
+//
+// StagedSource represents content discovered from external sources
+// waiting to be triaged into BuildingBlocks.
+//
+// Key design decisions:
+// - Same source can exist in multiple library inboxes (per-library staging)
+// - sourceType + externalId + libraryId = unique constraint
+// - metadata JSON absorbs source-specific fields without schema changes
+//
+// Source types and their metadata:
+// - 'url': { url, domain, crawledAt }
+// - 'zendesk': { ticketId, status, assignee, tags, customFields }
+// - 'slack': { channelId, channelName, threadTs, participants }
+// - 'notion': { pageId, workspaceId, parentId, properties }
+// - 'gong': { callId, duration, participants, topics }
+// - 'document': { fileName, fileType, s3Key }
+
+model StagedSource {
+  id              String    @id @default(cuid())
+
+  // === Source Identification ===
+  sourceType      String    // 'url', 'zendesk', 'slack', 'notion', 'gong', 'document'
+  externalId      String    // External system's ID
+  libraryId       String    // Which library inbox this is staged in
+
+  // === Customer Association (optional) ===
+  customerId      String?   // If this source belongs to a specific customer
+  customer        Customer? @relation(fields: [customerId], references: [id])
+
+  // === Content ===
+  title           String
+  content         String?   @db.Text // Raw/extracted content
+  contentPreview  String?   // Short preview for UI
+
+  // === Source-Specific Metadata ===
+  // Absorbs all variation without schema changes
+  metadata        Json      @default("{}")
+
+  // === Triage Status ===
+  stagedAt        DateTime  @default(now())
+  stagedBy        String?   // User or system that staged this
+  ignoredAt       DateTime? // Set when triager ignores this source
+  ignoredBy       String?
+
+  // === Relations ===
+  assignments     SourceAssignment[]
+
+  @@unique([sourceType, externalId, libraryId, customerId])
+  @@index([libraryId, stagedAt])
+  @@index([sourceType, libraryId])
+  @@index([customerId, stagedAt])
+}
+
+// Junction table linking staged sources to building blocks
+// A source can be assigned to multiple blocks
+// A block can have multiple sources feeding it
+model SourceAssignment {
+  id              String    @id @default(cuid())
+
+  stagedSourceId  String
+  stagedSource    StagedSource @relation(fields: [stagedSourceId], references: [id], onDelete: Cascade)
+
+  blockId         String
+  block           BuildingBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  // === Assignment Tracking ===
+  assignedAt      DateTime  @default(now())
+  assignedBy      String?   // User who made the assignment
+
+  // === Incorporation Status ===
+  // When the source content has been incorporated into the block
+  incorporatedAt  DateTime?
+  incorporatedBy  String?
+
+  // Notes about the assignment
+  notes           String?
+
+  // === Foundational Skills Support ===
+  // For foundational skills, this stores what content was extracted from the source
+  // This allows us to show "what was pulled" from each source for transparency
+  extractedContent String?   @db.Text
+
+  @@unique([stagedSourceId, blockId])
+  @@index([stagedSourceId])
+  @@index([blockId])
+}
+
+// ============================================================================
+// INTEGRATION CONNECTIONS
+// ============================================================================
+
+model IntegrationConnection {
+  id              String    @id @default(cuid())
+
+  // === Connection Identity ===
+  teamId          String?   // Team that owns this connection
+  integrationType String    // 'zendesk', 'slack', 'notion', 'gong', 'salesforce'
+  name            String    // User-friendly name
+
+  // === Configuration ===
+  // Integration-specific settings (channels, filters, etc.)
+  config          Json      @default("{}")
+
+  // === Status ===
+  status          String    @default("ACTIVE") // 'ACTIVE', 'PAUSED', 'ERROR'
+  lastSyncAt      DateTime?
+  lastError       String?
+
+  // === Timestamps ===
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([teamId, integrationType])
+}
+
+// ============================================================================
+// BULK OPERATIONS (BVA, Contract Review, etc.)
+// ============================================================================
+
+model BulkProject {
+  id              String    @id @default(cuid())
+
+  // === Project Identity ===
+  name            String
+  description     String?
+  projectType     String    // 'bva', 'contract-review', 'rfp', 'custom'
+
+  // === Ownership ===
+  teamId          String?
+  team            Team?     @relation(fields: [teamId], references: [id])
+  ownerId         String
+
+  // === Customer Linking ===
+  customerId      String?
+  customer        Customer? @relation("CustomerProjects", fields: [customerId], references: [id])
+
+  // === Configuration ===
+  // Project-specific settings stored as JSON
+  config          Json      @default("{}")
+
+  // === File Context ===
+  // Full file contents sent to LLM for context
+  fileContext     String?   @db.Text
+  fileContextTokens Int?
+
+  // === Status ===
+  // DRAFT: Project created, rows staged but not processed
+  // PROCESSING: Processing has started, rows being answered
+  // COMPLETED: All rows processed successfully
+  // ERROR: Processing failed with errors
+  // FINALIZED: Project locked, no more changes allowed
+  status          String    @default("DRAFT") // 'DRAFT', 'PROCESSING', 'COMPLETED', 'ERROR', 'FINALIZED'
+  finalizedAt     DateTime?
+  finalizedBy     String?
+
+  // === Timestamps ===
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  completedAt     DateTime?
+
+  // === Relations ===
+  rows            BulkRow[]
+
+  @@index([teamId])
+  @@index([ownerId])
+  @@index([status])
+  @@index([customerId])
+}
+
+model BulkRow {
+  id              String    @id @default(cuid())
+
+  projectId       String
+  project         BulkProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // === Row Data ===
+  rowNumber       Int
+
+  // Input data (varies by project type)
+  inputData       Json      @default("{}")
+
+  // Output/results from AI processing
+  outputData      Json      @default("{}")
+
+  // === Status ===
+  status          String    @default("PENDING") // 'PENDING', 'PROCESSING', 'COMPLETED', 'ERROR'
+  errorMessage    String?
+
+  // === Processing Info ===
+  processedAt     DateTime?
+  tokensUsed      Int?
+
+  // === Review Workflow ===
+  flaggedForReview      Boolean   @default(false)
+  flaggedAt             DateTime?
+  flaggedBy             String?
+  flagNote              String?
+  flagResolved          Boolean   @default(false)
+  flagResolvedAt        DateTime?
+  flagResolvedBy        String?
+  flagResolutionNote    String?
+  reviewStatus          String?   // 'REQUESTED', 'APPROVED', 'CORRECTED'
+  reviewRequestedAt     DateTime?
+  reviewRequestedBy     String?
+  reviewNote            String?
+  reviewedAt            DateTime?
+  reviewedBy            String?
+  userEditedAnswer      String?   @db.Text
+
+  // === Clarify Conversation ===
+  clarifyConversation   Json?
+
+  // === Timestamps ===
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([projectId, rowNumber])
+  @@index([projectId, status])
+  @@index([reviewStatus])
+}
+
+model V2QuestionHistory {
+  id            String   @id @default(cuid())
+
+  // === Ownership ===
+  userId        String
+  teamId        String?
+
+  // === Input ===
+  question      String   @db.Text
+  context       String?  @db.Text
+  library       String   @default("knowledge")
+  modelSpeed    String   @default("quality") // 'fast' or 'quality'
+  source        String   @default("quick") // 'quick' = single question, 'rfp' = bulk RFP processing
+
+  // === Output ===
+  outputData    Json?
+  status        String   @default("PENDING") // 'PENDING', 'PROCESSING', 'COMPLETED', 'ERROR'
+  errorMessage  String?
+  tokensUsed    Int?
+
+  // === Review Workflow ===
+  flaggedForReview      Boolean   @default(false)
+  flaggedAt             DateTime?
+  flaggedBy             String?
+  flagNote              String?
+  flagResolved          Boolean   @default(false)
+  flagResolvedAt        DateTime?
+  flagResolvedBy        String?
+  flagResolutionNote    String?
+  reviewStatus          String?   // 'REQUESTED', 'APPROVED', 'CORRECTED'
+  reviewRequestedAt     DateTime?
+  reviewRequestedBy     String?
+  reviewNote            String?
+  reviewedAt            DateTime?
+  reviewedBy            String?
+  userEditedAnswer      String?   @db.Text
+
+  // === Clarify Conversation ===
+  clarifyConversation   Json?
+
+  // === Timestamps ===
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([teamId])
+  @@index([createdAt])
+  @@index([status])
+  @@index([reviewStatus])
+  @@index([source])
+}
+
+// ============================================================================
+// CHAT & CONVERSATION
+// ============================================================================
+
+model ChatSession {
+  id              String    @id @default(cuid())
+
+  // === Session Identity ===
+  title           String?
+  sessionType     String    @default("chat") // 'chat', 'collateral'
+
+  // === Ownership ===
+  teamId          String?
+  team            Team?     @relation(fields: [teamId], references: [id])
+  userId          String
+
+  // === Customer Linking ===
+  customerId      String?
+  customer        Customer? @relation("CustomerChatSessions", fields: [customerId], references: [id])
+
+  // === Configuration ===
+  // Active persona, template, and other settings
+  config          Json      @default("{}")
+
+  // === Status ===
+  status          String    @default("ACTIVE") // 'ACTIVE', 'ARCHIVED'
+
+  // === Timestamps ===
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // === Relations ===
+  messages        ChatMessage[]
+  blockUsage      ChatBlockUsage[]
+
+  @@index([userId])
+  @@index([teamId])
+  @@index([customerId])
+}
+
+model ChatMessage {
+  id              String    @id @default(cuid())
+
+  sessionId       String
+  session         ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // === Message Content ===
+  role            String    // 'user', 'assistant', 'system'
+  content         String    @db.Text
+
+  // === Metadata ===
+  // Attachments, citations, tool calls, etc.
+  metadata        Json      @default("{}")
+
+  // === Token Usage ===
+  tokensUsed      Int?
+
+  // === Timestamps ===
+  createdAt       DateTime  @default(now())
+
+  @@index([sessionId, createdAt])
+}
+
+// Track which blocks were used in a chat session
+// Useful for analytics and improving block relevance
+model ChatBlockUsage {
+  id              String    @id @default(cuid())
+
+  sessionId       String
+  session         ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  blockId         String
+  block           BuildingBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  // === Usage Context ===
+  usageType       String    // 'context', 'retrieved', 'cited', 'explicit'
+
+  // === Feedback ===
+  wasHelpful      Boolean?
+
+  createdAt       DateTime  @default(now())
+
+  @@index([sessionId])
+  @@index([blockId])
+}
+
+// ============================================================================
+// OBSERVABILITY & ANALYTICS
+// ============================================================================
+
+model LLMTrace {
+  id              String    @id @default(cuid())
+
+  // === Request Identity ===
+  traceId         String?   // For distributed tracing
+  sessionId       String?   // Link to chat session if applicable
+
+  // === Request Details ===
+  model           String
+  provider        String    @default("anthropic")
+
+  // === Token Usage ===
+  inputTokens     Int
+  outputTokens    Int
+  totalTokens     Int
+
+  // === Cost Tracking ===
+  estimatedCost   Float?
+
+  // === Performance ===
+  latencyMs       Int?
+
+  // === Context ===
+  // What triggered this call, which blocks were used, etc.
+  context         Json      @default("{}")
+
+  // === Status ===
+  status          String    @default("SUCCESS") // 'SUCCESS', 'ERROR', 'TIMEOUT'
+  errorMessage    String?
+
+  // === Timestamps ===
+  createdAt       DateTime  @default(now())
+
+  @@index([sessionId])
+  @@index([createdAt])
+  @@index([model, createdAt])
+}
+
+// ============================================================================
+// BACKGROUND JOBS (BullMQ-compatible)
+// ============================================================================
+
+model BackgroundJob {
+  id              String    @id @default(cuid())
+
+  // === Job Identity ===
+  queueName       String
+  jobType         String    // 'sync-zendesk', 'process-document', 'refresh-block', etc.
+
+  // === Job Data ===
+  payload         Json      @default("{}")
+
+  // === Status ===
+  status          String    @default("PENDING") // 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'RETRYING'
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(3)
+
+  // === Results ===
+  result          Json?
+  errorMessage    String?
+
+  // === Scheduling ===
+  scheduledFor    DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  // === Timestamps ===
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([queueName, status])
+  @@index([scheduledFor])
+}
+
+// ============================================================================
+// API KEYS & EXTERNAL ACCESS
+// ============================================================================
+
+model ApiKey {
+  id              String    @id @default(cuid())
+
+  // === Key Identity ===
+  name            String
+  keyHash         String    @unique // Hashed API key
+  keyPrefix       String    // First few chars for identification
+
+  // === Ownership ===
+  teamId          String?
+  userId          String
+
+  // === Permissions ===
+  scopes          String[]  // ['read:blocks', 'write:blocks', 'chat', etc.]
+
+  // === Usage Limits ===
+  rateLimit       Int?      // Requests per minute
+
+  // === Status ===
+  status          String    @default("ACTIVE") // 'ACTIVE', 'REVOKED'
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+
+  // === Timestamps ===
+  createdAt       DateTime  @default(now())
+  revokedAt       DateTime?
+
+  @@index([keyHash])
+  @@index([teamId])
+  @@index([userId])
+}
+
+// ============================================================================
+// AUDIT LOG
+// ============================================================================
+
+model AuditLog {
+  id              String    @id @default(cuid())
+
+  // === Event Identity ===
+  eventType       String    // 'block.created', 'source.assigned', 'team.member.added', etc.
+
+  // === Actor ===
+  actorId         String?   // User ID
+  actorType       String    @default("user") // 'user', 'system', 'api'
+
+  // === Target ===
+  targetType      String?   // 'block', 'source', 'team', etc.
+  targetId        String?
+
+  // === Context ===
+  teamId          String?
+
+  // === Event Data ===
+  // Before/after state, additional context
+  data            Json      @default("{}")
+
+  // === Request Info ===
+  ipAddress       String?
+  userAgent       String?
+
+  // === Timestamp ===
+  createdAt       DateTime  @default(now())
+
+  @@index([eventType, createdAt])
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId])
+  @@index([teamId, createdAt])
+}
+
+// ============================================================================
+// SLACK BOT INTERACTIONS
+// ============================================================================
+
+model SlackBotInteraction {
+  id                String    @id @default(cuid())
+
+  // === Library Context ===
+  libraryId         String?   // Which library bot handled this (it, knowledge, gtm)
+
+  // === Slack Context ===
+  slackTeamId       String
+  slackChannelId    String
+  slackChannelName  String?
+  slackThreadTs     String
+  slackMessageTs    String
+  slackUserId       String
+  slackUserName     String?
+  slackPermalink    String?
+
+  // === Q&A Content ===
+  question          String
+  answer            String
+  confidence        String?   // 'High', 'Medium', 'Low'
+
+  // === Blocks Used ===
+  skillsUsed        Json      @default("[]") // Array of { id, title }
+  skillsSearched    Int       @default(0)
+
+  // === Performance ===
+  responseTimeMs    Int?
+  inputTokens       Int?
+  outputTokens      Int?
+
+  // === User Feedback ===
+  wasHelpful        Boolean?
+  userFeedback      String?
+
+  // === Timestamps ===
+  createdAt         DateTime  @default(now())
+
+  @@index([slackTeamId, slackChannelId])
+  @@index([slackUserId])
+  @@index([createdAt])
+  @@index([libraryId])
+}
+
+// ============================================================================
+// GENERATED VIEWS
+// ============================================================================
+
+model GeneratedView {
+  id          String   @id @default(cuid())
+
+  // Which view definition and customer this output belongs to
+  viewId      String
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Generated content
+  title       String
+  content     String   @db.Text
+
+  // Structured state summary for historical comparison between audit runs
+  // Contains key metrics, risk levels, and top findings for quick diff
+  stateSummary Json?
+
+  // Metadata about generation
+  generatedAt DateTime @default(now())
+  generatedBy String?
+
+  // Block IDs used in generation (for transparency)
+  usedBlockIds String[]
+
+  @@unique([viewId, customerId])
+  @@index([customerId])
+  @@index([viewId])
+}

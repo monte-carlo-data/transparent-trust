@@ -1,0 +1,61 @@
+#!/bin/bash
+set -e
+
+# Log all output
+exec > >(tee /var/log/bastion-setup.log) 2>&1
+echo "Starting bastion setup at $(date)"
+
+# Update system
+dnf update -y
+
+# Install PostgreSQL client for database access
+dnf install -y postgresql15
+
+# Install useful debugging tools
+dnf install -y htop vim curl wget jq
+
+# ============================================
+# Install Tailscale (using official install script)
+# https://tailscale.com/kb/1031/install-linux
+# ============================================
+echo "Installing Tailscale..."
+
+# Use Tailscale's official install script - always gets latest version
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# Enable and start tailscaled
+systemctl enable --now tailscaled
+
+# Wait for tailscaled to be ready
+sleep 5
+
+# ============================================
+# Authenticate Tailscale
+# ============================================
+%{ if tailscale_auth_key_secret_arn != "" ~}
+echo "Fetching Tailscale auth key from Secrets Manager..."
+TAILSCALE_AUTH_KEY=$(aws secretsmanager get-secret-value \
+  --secret-id "${tailscale_auth_key_secret_arn}" \
+  --query 'SecretString' \
+  --output text \
+  --region "${aws_region}" | jq -r '.authKey // .')
+
+if [ -n "$TAILSCALE_AUTH_KEY" ] && [ "$TAILSCALE_AUTH_KEY" != "null" ]; then
+  echo "Authenticating with Tailscale..."
+  tailscale up \
+    --authkey="$TAILSCALE_AUTH_KEY" \
+    --hostname="${hostname}" \
+    --advertise-tags="${tailscale_tags}" \
+    --ssh
+  echo "Tailscale connected successfully!"
+  tailscale status
+else
+  echo "WARNING: Could not retrieve Tailscale auth key. Manual authentication required."
+  echo "Run: sudo tailscale up --hostname=${hostname} --ssh"
+fi
+%{ else ~}
+echo "No Tailscale auth key configured. Manual authentication required."
+echo "Run: sudo tailscale up --hostname=${hostname} --ssh"
+%{ endif ~}
+
+echo "Bastion setup complete at $(date)"

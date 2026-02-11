@@ -1,0 +1,715 @@
+"use client";
+
+/**
+ * V2 Collateral Builder Page
+ *
+ * Conversational collateral generation using templates and customer context.
+ * Shares components with Chat page for consistency.
+ */
+
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSession } from "next-auth/react";
+import { Button } from "@/components/ui/button";
+import { ResizableDivider } from "@/components/ui/resizable-divider";
+import { useResizablePanel } from "@/hooks/use-resizable-panel";
+import { KnowledgeBar } from "@/components/knowledge-bar";
+import TransparencyModal from "@/components/TransparencyModal";
+import {
+  Bot,
+  FileText,
+  Send,
+  User,
+  Eye,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Copy,
+  Download,
+  Check,
+  Presentation,
+} from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { InlineLoader } from "@/components/ui/loading";
+import ReactMarkdown from "react-markdown";
+import { MessageFeedback } from "@/components/chat/message-feedback";
+import { ContextControlsBar, type InstructionPreset } from "@/components/v2/config";
+import { ChatStatusBar } from "@/components/chat/chat-status-bar";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useSelectionStore } from "@/stores/selection-store";
+import { useChatSession } from "@/hooks/use-chat-session";
+import { useApiQuery } from "@/hooks/use-api";
+import { toast } from "sonner";
+import type { Customer, TemplateAttributes } from "@/types/v2";
+
+type Template = {
+  id: string;
+  title: string;
+  slug: string | null;
+  content: string;
+  summary: string | null;
+  attributes: TemplateAttributes | null;
+};
+
+const TEMPLATE_SIDEBAR_MIN_WIDTH = 280;
+const TEMPLATE_SIDEBAR_MAX_WIDTH = 450;
+const TEMPLATE_SIDEBAR_DEFAULT_WIDTH = 340;
+
+const KNOWLEDGE_SIDEBAR_MIN_WIDTH = 280;
+const KNOWLEDGE_SIDEBAR_MAX_WIDTH = 500;
+const KNOWLEDGE_SIDEBAR_DEFAULT_WIDTH = 360;
+
+export default function CollateralPage() {
+  useSession(); // Ensure user is authenticated
+  const [input, setInput] = useState("");
+  const [showTransparency, setShowTransparency] = useState(false);
+  const [transparencyMessageId, setTransparencyMessageId] = useState<string | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [selectedPersona, setSelectedPersona] = useState<InstructionPreset | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Sidebar collapse state
+  const [isTemplateSidebarOpen, setIsTemplateSidebarOpen] = useState(true);
+  const [isKnowledgeSidebarOpen, setIsKnowledgeSidebarOpen] = useState(true);
+
+  // Get state from stores
+  const modelSpeed = useSettingsStore((state) => state.modelSpeed);
+  const callMode = useSettingsStore((state) => state.callMode);
+  const webSearchEnabled = useSettingsStore((state) => state.webSearchEnabled);
+  const selectedPresetId = useSettingsStore((state) => state.selectedPresetId);
+  const setSettingsModelSpeed = useSettingsStore((state) => state.setModelSpeed);
+  const setSettingsCallMode = useSettingsStore((state) => state.setCallMode);
+  const setSettingsWebSearchEnabled = useSettingsStore((state) => state.setWebSearchEnabled);
+  const setSettingsPresetId = useSettingsStore((state) => state.setSelectedPresetId);
+  const setSettingsUserInstructions = useSettingsStore((state) => state.setUserInstructions);
+
+  // Select raw maps to avoid creating new arrays on every render
+  const skillSelections = useSelectionStore((state) => state.skillSelections);
+  const documentSelections = useSelectionStore((state) => state.documentSelections);
+  const urlSelections = useSelectionStore((state) => state.urlSelections);
+
+  // Compute derived values with useMemo
+  const selectedSkillCount = useMemo(() => {
+    let count = 0;
+    skillSelections.forEach((selected) => { if (selected) count++; });
+    return count;
+  }, [skillSelections]);
+
+  const selectedDocCount = useMemo(() => {
+    let count = 0;
+    documentSelections.forEach((selected) => { if (selected) count++; });
+    return count;
+  }, [documentSelections]);
+
+  const selectedUrlCount = useMemo(() => {
+    let count = 0;
+    urlSelections.forEach((selected) => { if (selected) count++; });
+    return count;
+  }, [urlSelections]);
+
+  // Get session management from custom hook
+  const {
+    sessionId,
+    sessionCustomerId,
+    messages,
+    isSendingMessage,
+    sendMessage,
+    createSession,
+    clearSession,
+  } = useChatSession();
+
+  // Sync selectedCustomerId with session's customer when session loads
+  useEffect(() => {
+    if (sessionCustomerId !== null) {
+      setSelectedCustomerId(sessionCustomerId);
+    }
+  }, [sessionCustomerId]);
+
+  // Fetch templates
+  const { data: templates = [], isLoading: templatesLoading } = useApiQuery<Template[]>({
+    queryKey: ["v2-collateral-templates"],
+    url: "/api/v2/blocks",
+    params: { libraryId: "templates", status: "ACTIVE", limit: 50 },
+    responseKey: "blocks",
+    transform: (data) => (Array.isArray(data) ? data : []),
+  });
+
+  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
+
+  // Resizable template sidebar
+  const {
+    panelWidth: templateSidebarWidth,
+    isDragging: isTemplateDragging,
+    containerRef: templateContainerRef,
+    handleMouseDown: handleTemplateMouseDown,
+  } = useResizablePanel({
+    storageKey: "collateral-v2-template-width",
+    defaultWidth: TEMPLATE_SIDEBAR_DEFAULT_WIDTH,
+    minWidth: TEMPLATE_SIDEBAR_MIN_WIDTH,
+    maxWidth: TEMPLATE_SIDEBAR_MAX_WIDTH,
+  });
+
+  // Resizable knowledge sidebar
+  const {
+    panelWidth: knowledgeSidebarWidth,
+    isDragging: isKnowledgeDragging,
+    containerRef: knowledgeContainerRef,
+    handleMouseDown: handleKnowledgeMouseDown,
+  } = useResizablePanel({
+    storageKey: "collateral-v2-knowledge-width",
+    defaultWidth: KNOWLEDGE_SIDEBAR_DEFAULT_WIDTH,
+    minWidth: KNOWLEDGE_SIDEBAR_MIN_WIDTH,
+    maxWidth: KNOWLEDGE_SIDEBAR_MAX_WIDTH,
+  });
+
+  // Load customers
+  useEffect(() => {
+    const loadCustomers = async () => {
+      setCustomersLoading(true);
+      try {
+        const response = await fetch("/api/v2/customers");
+        if (response.ok) {
+          const data = await response.json();
+          setCustomers(data.customers || []);
+        }
+      } catch (error) {
+        console.error("Failed to load customers:", error);
+      } finally {
+        setCustomersLoading(false);
+      }
+    };
+    loadCustomers();
+  }, []);
+
+  // Get the latest assistant message content for export
+  const latestAssistantMessage = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "assistant") {
+        return messages[i];
+      }
+    }
+    return null;
+  }, [messages]);
+
+  const selectedTransparencyMessage = messages.find(
+    (message) => message.id === transparencyMessageId
+  );
+  const selectedTransparency = selectedTransparencyMessage?.transparency;
+  const transparencySections = selectedTransparency?.blocksUsed?.length
+    ? selectedTransparency.blocksUsed.map((block, index) => ({
+        id: block.id,
+        title: `Block ${index + 1}: ${block.title}`,
+        content: block.content,
+        note: `ID: ${block.id} • Type: ${block.blockType}`,
+        defaultExpanded: index === 0,
+        maxHeight: 240,
+      }))
+    : selectedTransparency
+      ? [
+          {
+            id: "blocks-empty",
+            title: "Blocks Used",
+            content: "No blocks were used for this response.",
+            defaultExpanded: true,
+            maxHeight: 160,
+          },
+        ]
+      : [];
+
+  const handlePresetChange = useCallback((preset: InstructionPreset | null) => {
+    setSettingsPresetId(preset?.id || null);
+    setSettingsUserInstructions(preset?.content || "");
+    setSelectedPersona(preset);
+  }, [setSettingsPresetId, setSettingsUserInstructions]);
+
+  const handleUserInstructionsChange = useCallback((instructions: string) => {
+    setSettingsUserInstructions(instructions);
+  }, [setSettingsUserInstructions]);
+
+  const handleCallModeChange = useCallback((enabled: boolean) => {
+    setSettingsCallMode(enabled);
+  }, [setSettingsCallMode]);
+
+  const handleSendMessage = useCallback(async (messageText: string) => {
+    if (!messageText.trim() || isSendingMessage) return;
+    try {
+      // If no session exists and customer is selected, create session with customer first
+      if (!sessionId && selectedCustomerId) {
+        await createSession({
+          customerId: selectedCustomerId,
+          sessionType: 'collateral',
+        });
+      } else if (!sessionId) {
+        // Create collateral session without customer
+        await createSession({
+          sessionType: 'collateral',
+        });
+      }
+      await sendMessage(messageText);
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      toast.error("Failed to send message. Please try again.");
+    }
+  }, [isSendingMessage, sessionId, selectedCustomerId, createSession, sendMessage]);
+
+  const handleGenerateFromTemplate = useCallback(async () => {
+    if (!selectedTemplate) {
+      toast.error("Please select a template first");
+      return;
+    }
+
+    // Build the generation prompt
+    const customerContext = selectedCustomerId
+      ? customers.find((c) => c.id === selectedCustomerId)
+      : null;
+
+    let prompt = `Generate collateral using the "${selectedTemplate.title}" template.\n\n`;
+    prompt += `Template structure:\n${selectedTemplate.content}\n\n`;
+
+    if (customerContext) {
+      prompt += `Customer context: ${customerContext.company}\n`;
+    }
+
+    prompt += `Please fill in the template with relevant content based on the selected knowledge context. Make it compelling and professional.`;
+
+    await handleSendMessage(prompt);
+  }, [selectedTemplate, selectedCustomerId, customers, handleSendMessage]);
+
+  const handleCopy = async () => {
+    if (!latestAssistantMessage?.content) return;
+    await navigator.clipboard.writeText(latestAssistantMessage.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+    toast.success("Copied to clipboard");
+  };
+
+  const handleDownloadMarkdown = () => {
+    if (!latestAssistantMessage?.content) return;
+    const filename = selectedTemplate
+      ? `${selectedTemplate.title.toLowerCase().replace(/\s+/g, "-")}.md`
+      : "collateral.md";
+    const blob = new Blob([latestAssistantMessage.content], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("Downloaded as Markdown");
+  };
+
+  const startNewCollateral = () => {
+    // Clear session state
+    clearSession();
+    // Clear selections
+    setSelectedTemplateId(null);
+    setSelectedCustomerId(null);
+    useSelectionStore.setState({
+      skillSelections: new Map(),
+      documentSelections: new Map(),
+      urlSelections: new Map(),
+      customerSelections: new Map(),
+    });
+  };
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-0px)] overflow-hidden bg-background" ref={templateContainerRef}>
+      {/* Top Control Bar */}
+      <ContextControlsBar
+        selectedPresetId={selectedPresetId}
+        onPresetChange={handlePresetChange}
+        onUserInstructionsChange={handleUserInstructionsChange}
+        callMode={callMode}
+        onCallModeChange={handleCallModeChange}
+        customers={customers}
+        selectedCustomerId={selectedCustomerId}
+        onCustomerSelect={(id) => setSelectedCustomerId(id)}
+        customersLoading={customersLoading}
+        customerDisabled={!!sessionId}
+        customerDisabledReason="Customer is locked for this session. Click 'New' to change customer."
+        leftContent={
+          <div className="flex items-center gap-3">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsTemplateSidebarOpen(!isTemplateSidebarOpen)}
+              className="gap-2"
+              title={isTemplateSidebarOpen ? "Hide Templates" : "Show Templates"}
+            >
+              {isTemplateSidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+              <span className="text-sm font-medium">
+                Templates <span className="text-muted-foreground">({templates.length})</span>
+              </span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={startNewCollateral}
+              className="gap-2"
+            >
+              <FileText className="h-3 w-3" />
+              New
+            </Button>
+          </div>
+        }
+        rightContent={
+          latestAssistantMessage && (
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={handleCopy} className="gap-2">
+                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                {copied ? "Copied" : "Copy"}
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleDownloadMarkdown} className="gap-2">
+                <Download className="h-3 w-3" />
+                Download
+              </Button>
+              <Button size="sm" variant="outline" disabled className="gap-2" title="Coming soon">
+                <Presentation className="h-3 w-3" />
+                Slides
+              </Button>
+            </div>
+          )
+        }
+      />
+
+      {/* Main Content Area */}
+      <div className="flex flex-1 overflow-hidden" ref={templateContainerRef}>
+        {/* Left Sidebar - Template Selection */}
+        {isTemplateSidebarOpen && (
+          <>
+            <div
+              style={{ width: `${templateSidebarWidth}px` }}
+              className="flex-shrink-0 flex flex-col bg-card border-r transition-all duration-200"
+            >
+              <div className="p-4 border-b flex items-center justify-between">
+                <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">
+                  Templates
+                </h2>
+                <Button size="sm" variant="ghost" onClick={() => setIsTemplateSidebarOpen(false)} title="Close Templates">
+                  <PanelLeftClose className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2">
+                {templatesLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <InlineLoader size="sm" />
+                  </div>
+                ) : templates.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-muted-foreground">
+                    <div className="text-center space-y-2 p-4">
+                      <FileText className="h-8 w-8 mx-auto opacity-30" />
+                      <p className="text-xs">No templates available</p>
+                      <p className="text-xs opacity-70">Create templates in Admin</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {templates.map((template) => {
+                      const isSelected = selectedTemplateId === template.id;
+                      return (
+                        <button
+                          key={template.id}
+                          onClick={() => setSelectedTemplateId(template.id)}
+                          className={`w-full text-left p-3 rounded-lg border transition-all ${
+                            isSelected
+                              ? "border-primary bg-primary/5"
+                              : "border-transparent hover:bg-accent"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <FileText className={`h-4 w-4 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
+                            <span className="font-medium text-sm truncate">{template.title}</span>
+                          </div>
+                          {template.summary && (
+                            <p className="text-xs text-muted-foreground line-clamp-2 ml-6">
+                              {template.summary}
+                            </p>
+                          )}
+                          {template.attributes?.format && (
+                            <span className="inline-block mt-1 ml-6 px-2 py-0.5 text-[10px] bg-muted text-muted-foreground rounded uppercase">
+                              {template.attributes.format}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Generate Button */}
+              {selectedTemplate && (
+                <div className="p-4 border-t bg-muted/30">
+                  <div className="mb-3 p-3 bg-background rounded-lg border">
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Selected Template</p>
+                    <p className="text-sm font-medium">{selectedTemplate.title}</p>
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={handleGenerateFromTemplate}
+                    disabled={isSendingMessage}
+                  >
+                    {isSendingMessage ? (
+                      <>
+                        <InlineLoader size="sm" className="mr-2" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="h-4 w-4 mr-2" />
+                        Generate Collateral
+                      </>
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Resizable Divider */}
+            <ResizableDivider isDragging={isTemplateDragging} onMouseDown={handleTemplateMouseDown} />
+          </>
+        )}
+
+        {/* Center - Main Chat Area */}
+        <div className="flex flex-1 flex-col min-w-0 bg-background relative">
+          {/* Left edge toggle for Template sidebar (when collapsed) */}
+          {!isTemplateSidebarOpen && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsTemplateSidebarOpen(true)}
+              className="absolute left-0 top-1/2 -translate-y-1/2 z-10 h-24 w-6 rounded-l-none rounded-r-md bg-muted/80 hover:bg-muted border-r border-y"
+              title="Show Templates"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </Button>
+          )}
+
+          {/* Right edge toggle for Knowledge sidebar (when collapsed) */}
+          {!isKnowledgeSidebarOpen && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsKnowledgeSidebarOpen(true)}
+              className="absolute right-0 top-1/2 -translate-y-1/2 z-10 h-24 w-6 rounded-r-none rounded-l-md bg-muted/80 hover:bg-muted border-l border-y"
+              title="Show Knowledge"
+            >
+              <PanelRightOpen className="h-4 w-4" />
+            </Button>
+          )}
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {messages.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-muted-foreground">
+                <div className="text-center space-y-3 max-w-md">
+                  <FileText className="h-12 w-12 mx-auto opacity-50" />
+                  <p className="font-medium">Create Collateral</p>
+                  <p className="text-sm">
+                    1. Select a template from the sidebar<br />
+                    2. Choose customer context and knowledge sources<br />
+                    3. Click &quot;Generate Collateral&quot; to create content<br />
+                    4. Refine with follow-up messages
+                  </p>
+                </div>
+              </div>
+            ) : (
+              messages.map((message) => {
+                const isUser = message.role === "user";
+                const hasTransparency = Boolean(message.transparency);
+                return (
+                  <div
+                    key={message.id}
+                    className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+                  >
+                    <div
+                      className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                        isUser ? "bg-primary text-primary-foreground" : "bg-muted"
+                      }`}
+                    >
+                      {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                    </div>
+                    <div
+                      className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                        isUser
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-foreground"
+                      }`}
+                    >
+                      {!isUser && (
+                        <div className="flex items-center justify-end mb-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-7 w-7 ${!hasTransparency ? "opacity-40 cursor-not-allowed" : ""}`}
+                            onClick={() => {
+                              if (!hasTransparency) return;
+                              setTransparencyMessageId(message.id);
+                              setShowTransparency(true);
+                            }}
+                            disabled={!hasTransparency}
+                            title={
+                              hasTransparency
+                                ? "View transparency"
+                                : "Transparency not available for this message"
+                            }
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
+                      <div className="text-sm leading-relaxed prose prose-sm max-w-none">
+                        {isUser ? (
+                          <span className="whitespace-pre-wrap">{message.content}</span>
+                        ) : (
+                          <ReactMarkdown>{message.content}</ReactMarkdown>
+                        )}
+                      </div>
+                      {!isUser && (
+                        <MessageFeedback
+                          messageId={message.id}
+                          sessionId={sessionId}
+                          feedback={message.feedback}
+                          onFeedbackChange={() => {}}
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Status Bar */}
+          <ChatStatusBar
+            selectedSkillCount={selectedSkillCount}
+            selectedDocCount={selectedDocCount}
+            selectedUrlCount={selectedUrlCount}
+            modelSpeed={modelSpeed}
+            isLoading={isSendingMessage}
+            onCustomize={() => setIsKnowledgeSidebarOpen(!isKnowledgeSidebarOpen)}
+            selectedCustomerName={selectedCustomerId ? customers.find(c => c.id === selectedCustomerId)?.company : null}
+          />
+
+          {/* Input Area */}
+          <div className="border-t border-border bg-background p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              {/* Speed Toggle */}
+              <Button
+                size="sm"
+                variant={modelSpeed === "fast" ? "default" : "outline"}
+                onClick={() => setSettingsModelSpeed(modelSpeed === "fast" ? "quality" : "fast")}
+                className="gap-2 h-8"
+                title="Response Speed: Fast (Haiku) or Quality (Sonnet)"
+              >
+                <span className="text-xs">Speed: {modelSpeed === "fast" ? "Fast" : "Quality"}</span>
+              </Button>
+
+              {/* Web Search Toggle */}
+              <Button
+                size="sm"
+                variant={webSearchEnabled ? "default" : "outline"}
+                onClick={() => setSettingsWebSearchEnabled(!webSearchEnabled)}
+                className="gap-2 h-8"
+                title="Enable web search for real-time information"
+              >
+                <span className="text-xs">{webSearchEnabled ? "Search On" : "Local Only"}</span>
+              </Button>
+            </div>
+            <div className="flex items-end gap-3">
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSendMessage(input);
+                    setInput("");
+                  }
+                }}
+                placeholder={messages.length === 0 ? "Select a template and click Generate, or type a message..." : "Refine the collateral (e.g., 'make section 2 more detailed')..."}
+                disabled={isSendingMessage}
+                className="min-h-[52px] resize-none"
+                rows={2}
+              />
+              <Button
+                onClick={() => {
+                  if (input.trim()) {
+                    handleSendMessage(input);
+                    setInput("");
+                  }
+                }}
+                disabled={isSendingMessage || !input.trim()}
+                size="icon"
+                className="h-12 w-12 shrink-0"
+              >
+                {isSendingMessage ? (
+                  <InlineLoader size="sm" />
+                ) : (
+                  <Send className="h-5 w-5" />
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Sidebar - Knowledge Context */}
+        {isKnowledgeSidebarOpen && (
+          <>
+            <ResizableDivider isDragging={isKnowledgeDragging} onMouseDown={handleKnowledgeMouseDown} />
+
+            <div
+              ref={knowledgeContainerRef}
+              style={{ width: `${knowledgeSidebarWidth}px` }}
+              className="flex-shrink-0 transition-all duration-200 border-l"
+            >
+              <div className="h-full flex flex-col">
+                <div className="p-3 border-b bg-card flex items-center justify-between">
+                  <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">
+                    Knowledge Context
+                  </h2>
+                  <Button size="sm" variant="ghost" onClick={() => setIsKnowledgeSidebarOpen(false)} title="Close Knowledge">
+                    <PanelRightClose className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3 bg-card space-y-3">
+                  <KnowledgeBar
+                    selectedPersona={selectedPersona}
+                    selectedCustomerId={selectedCustomerId}
+                  />
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Transparency Modal */}
+      {selectedTransparency && (
+        <TransparencyModal
+          open={showTransparency}
+          onClose={() => {
+            setShowTransparency(false);
+            setTransparencyMessageId(null);
+          }}
+          title="Transparency"
+          subtitle="See the prompt, model, and blocks used for this response"
+          headerColor="gray"
+          configs={[
+            { label: "Composition", value: selectedTransparency.compositionId, color: "purple" },
+            { label: "Model", value: selectedTransparency.model, color: "blue" },
+            { label: "Prompt Blocks", value: selectedTransparency.blockIds.length, color: "blue" },
+            ...(selectedTransparency.runtimeContext?.callMode ? [{ label: "Call Mode", value: "On", color: "yellow" as const }] : []),
+            ...(selectedTransparency.runtimeContext?.userInstructions ? [{ label: "Custom Instructions", value: "Yes", color: "green" as const }] : []),
+          ]}
+          systemPrompt={selectedTransparency.systemPrompt}
+          sections={transparencySections}
+        />
+      )}
+    </div>
+  );
+}

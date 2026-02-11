@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(aws ec2 describe-subnets:*)",
+      "Bash(npm run lint:*)"
+    ]
+  }
+}

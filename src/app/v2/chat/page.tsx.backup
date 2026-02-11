@@ -1,0 +1,660 @@
+"use client";
+
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSession } from "next-auth/react";
+import { Button } from "@/components/ui/button";
+import { ResizableDivider } from "@/components/ui/resizable-divider";
+import { useResizablePanel } from "@/hooks/use-resizable-panel";
+import { KnowledgeBar } from "@/components/knowledge-bar";
+import TransparencyModal from "@/components/TransparencyModal";
+import { Bot, MessageSquare, Plus, Send, Trash2, User, Eye, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { InlineLoader } from "@/components/ui/loading";
+import ReactMarkdown from "react-markdown";
+import { MessageFeedback } from "@/components/chat/message-feedback";
+import { ContextControlsBar, type InstructionPreset } from "@/components/v2/config";
+import { ChatStatusBar } from "@/components/chat/chat-status-bar";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useSelectionStore } from "@/stores/selection-store";
+import { useChatSession } from "@/hooks/use-chat-session";
+import { toast } from "sonner";
+import type { Customer } from "@/types/v2";
+
+type ChatBlock = {
+  id: string;
+  title: string;
+  libraryId: string;
+  entryType?: string | null;
+};
+
+const HISTORY_SIDEBAR_MIN_WIDTH = 280;
+const HISTORY_SIDEBAR_MAX_WIDTH = 400;
+const HISTORY_SIDEBAR_DEFAULT_WIDTH = 320;
+
+const KNOWLEDGE_SIDEBAR_MIN_WIDTH = 280;
+const KNOWLEDGE_SIDEBAR_MAX_WIDTH = 500;
+const KNOWLEDGE_SIDEBAR_DEFAULT_WIDTH = 360;
+
+export default function ChatPage() {
+  const { data: session } = useSession();
+  const [input, setInput] = useState("");
+  const [showTransparency, setShowTransparency] = useState(false);
+  const [showPromptPreview, setShowPromptPreview] = useState(false);
+  const [availableBlocks, setAvailableBlocks] = useState<ChatBlock[]>([]);
+  const [transparencyMessageId, setTransparencyMessageId] = useState<string | null>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [selectedPersona, setSelectedPersona] = useState<InstructionPreset | null>(null);
+
+  // Sidebar collapse state - start collapsed
+  const [isHistorySidebarOpen, setIsHistorySidebarOpen] = useState(false);
+  const [isKnowledgeSidebarOpen, setIsKnowledgeSidebarOpen] = useState(false);
+
+  // Get state from stores
+  const modelSpeed = useSettingsStore((state) => state.modelSpeed);
+  const callMode = useSettingsStore((state) => state.callMode);
+  const webSearchEnabled = useSettingsStore((state) => state.webSearchEnabled);
+  const selectedPresetId = useSettingsStore((state) => state.selectedPresetId);
+  const userInstructions = useSettingsStore((state) => state.userInstructions);
+  const setSettingsModelSpeed = useSettingsStore((state) => state.setModelSpeed);
+  const setSettingsCallMode = useSettingsStore((state) => state.setCallMode);
+  const setSettingsWebSearchEnabled = useSettingsStore((state) => state.setWebSearchEnabled);
+  const setSettingsPresetId = useSettingsStore((state) => state.setSelectedPresetId);
+  const setSettingsUserInstructions = useSettingsStore((state) => state.setUserInstructions);
+
+  // Select raw maps to avoid creating new arrays on every render (which causes infinite loops)
+  const skillSelections = useSelectionStore((state) => state.skillSelections);
+  const documentSelections = useSelectionStore((state) => state.documentSelections);
+  const urlSelections = useSelectionStore((state) => state.urlSelections);
+
+  // Compute derived values with useMemo to avoid recalculation on every render
+  const selectedBlockIds = useMemo(() => {
+    const ids: string[] = [];
+    skillSelections.forEach((selected, id) => { if (selected) ids.push(id); });
+    documentSelections.forEach((selected, id) => { if (selected) ids.push(id); });
+    urlSelections.forEach((selected, id) => { if (selected) ids.push(id); });
+    return ids;
+  }, [skillSelections, documentSelections, urlSelections]);
+
+  const selectedSkillCount = useMemo(() => {
+    let count = 0;
+    skillSelections.forEach((selected) => { if (selected) count++; });
+    return count;
+  }, [skillSelections]);
+
+  const selectedDocCount = useMemo(() => {
+    let count = 0;
+    documentSelections.forEach((selected) => { if (selected) count++; });
+    return count;
+  }, [documentSelections]);
+
+  const selectedUrlCount = useMemo(() => {
+    let count = 0;
+    urlSelections.forEach((selected) => { if (selected) count++; });
+    return count;
+  }, [urlSelections]);
+
+  // Get session management from custom hook
+  const {
+    sessionId,
+    sessionCustomerId,
+    messages,
+    sessions,
+    isSendingMessage,
+    sendMessage,
+    createSession,
+    loadSession,
+    deleteSession,
+    loadSessions,
+    clearSession,
+  } = useChatSession();
+
+  // Sync selectedCustomerId with session's customer when session loads
+  useEffect(() => {
+    if (sessionCustomerId !== null) {
+      setSelectedCustomerId(sessionCustomerId);
+    }
+  }, [sessionCustomerId]);
+
+  // Resizable history sidebar
+  const {
+    panelWidth: historySidebarWidth,
+    isDragging: isHistoryDragging,
+    containerRef: historyContainerRef,
+    handleMouseDown: handleHistoryMouseDown,
+  } = useResizablePanel({
+    storageKey: "chat-v2-history-width",
+    defaultWidth: HISTORY_SIDEBAR_DEFAULT_WIDTH,
+    minWidth: HISTORY_SIDEBAR_MIN_WIDTH,
+    maxWidth: HISTORY_SIDEBAR_MAX_WIDTH,
+  });
+
+  // Resizable knowledge sidebar
+  const {
+    panelWidth: knowledgeSidebarWidth,
+    isDragging: isKnowledgeDragging,
+    containerRef: knowledgeContainerRef,
+    handleMouseDown: handleKnowledgeMouseDown,
+  } = useResizablePanel({
+    storageKey: "chat-v2-knowledge-width",
+    defaultWidth: KNOWLEDGE_SIDEBAR_DEFAULT_WIDTH,
+    minWidth: KNOWLEDGE_SIDEBAR_MIN_WIDTH,
+    maxWidth: KNOWLEDGE_SIDEBAR_MAX_WIDTH,
+  });
+
+  // Load blocks and customers on mount
+  useEffect(() => {
+    if (!session?.user) return;
+    const loadBlocks = async () => {
+      try {
+        const response = await fetch("/api/v2/blocks?libraryId=knowledge&status=ACTIVE&limit=200&orderBy=title&orderDir=asc");
+        if (!response.ok) return;
+        const data = await response.json();
+        setAvailableBlocks(data.blocks || []);
+      } catch (error) {
+        console.error("Failed to load blocks:", error);
+      }
+    };
+    loadBlocks();
+  }, [session]);
+
+  // Load customers
+  useEffect(() => {
+    const loadCustomers = async () => {
+      setCustomersLoading(true);
+      try {
+        const response = await fetch("/api/v2/customers");
+        if (response.ok) {
+          const data = await response.json();
+          setCustomers(data.customers || []);
+        }
+      } catch (error) {
+        console.error("Failed to load customers:", error);
+      } finally {
+        setCustomersLoading(false);
+      }
+    };
+    loadCustomers();
+  }, []);
+
+  // Load sessions on mount
+  useEffect(() => {
+    if (session?.user) {
+      loadSessions();
+    }
+  }, [session, loadSessions]);
+
+  const startNewChat = () => {
+    // Clear session state
+    clearSession();
+    // Clear selected customer (allows re-selection)
+    setSelectedCustomerId(null);
+    // Clear skill selections
+    useSelectionStore.setState({
+      skillSelections: new Map(),
+      documentSelections: new Map(),
+      urlSelections: new Map(),
+      customerSelections: new Map(),
+    });
+  };
+
+  const selectedTransparencyMessage = messages.find(
+    (message) => message.id === transparencyMessageId
+  );
+  const selectedTransparency = selectedTransparencyMessage?.transparency;
+  const transparencySections = selectedTransparency?.blocksUsed?.length
+    ? selectedTransparency.blocksUsed.map((block, index) => ({
+        id: block.id,
+        title: `Block ${index + 1}: ${block.title}`,
+        content: block.content,
+        note: `ID: ${block.id} • Type: ${block.blockType}`,
+        defaultExpanded: index === 0,
+        maxHeight: 240,
+      }))
+    : selectedTransparency
+      ? [
+          {
+            id: "blocks-empty",
+            title: "Blocks Used",
+            content: "No blocks were used for this response.",
+            defaultExpanded: true,
+            maxHeight: 160,
+          },
+        ]
+      : [];
+
+  const handlePresetChange = useCallback((preset: InstructionPreset | null) => {
+    setSettingsPresetId(preset?.id || null);
+    setSettingsUserInstructions(preset?.content || "");
+    setSelectedPersona(preset);
+  }, [setSettingsPresetId, setSettingsUserInstructions]);
+
+  const handleUserInstructionsChange = useCallback((instructions: string) => {
+    setSettingsUserInstructions(instructions);
+  }, [setSettingsUserInstructions]);
+
+  const handleCallModeChange = useCallback((enabled: boolean) => {
+    setSettingsCallMode(enabled);
+  }, [setSettingsCallMode]);
+
+  const handleSendMessage = useCallback(async (messageText: string) => {
+    if (!messageText.trim() || isSendingMessage) return;
+    try {
+      // If no session exists and customer is selected, create session with customer first
+      if (!sessionId && selectedCustomerId) {
+        await createSession({
+          customerId: selectedCustomerId,
+          sessionType: 'chat',
+        });
+      }
+      await sendMessage(messageText);
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      toast.error("Failed to send message. Please try again.");
+    }
+  }, [isSendingMessage, sessionId, selectedCustomerId, createSession, sendMessage]);
+
+  return (
+    <div className="flex flex-col h-[calc(100vh-0px)] overflow-hidden bg-background" ref={historyContainerRef}>
+      {/* Top Control Bar */}
+      <ContextControlsBar
+        selectedPresetId={selectedPresetId}
+        onPresetChange={handlePresetChange}
+        onUserInstructionsChange={handleUserInstructionsChange}
+        callMode={callMode}
+        onCallModeChange={handleCallModeChange}
+        customers={customers}
+        selectedCustomerId={selectedCustomerId}
+        onCustomerSelect={(id) => setSelectedCustomerId(id)}
+        customersLoading={customersLoading}
+        customerDisabled={!!sessionId}
+        customerDisabledReason="Customer is locked for this session. Start a new chat to change customer."
+        leftContent={
+          <div className="flex items-center gap-3">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsHistorySidebarOpen(!isHistorySidebarOpen)}
+              className="gap-2"
+              title={isHistorySidebarOpen ? "Hide History" : "Show History"}
+            >
+              {isHistorySidebarOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+              <span className="text-sm font-medium">
+                History <span className="text-muted-foreground">({sessions.length})</span>
+              </span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={startNewChat}
+              className="gap-2"
+            >
+              <Plus className="h-3 w-3" />
+              New Chat
+            </Button>
+            {sessionId && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={startNewChat}
+                className="text-destructive hover:text-destructive"
+              >
+                End Chat
+              </Button>
+            )}
+          </div>
+        }
+      />
+
+      {/* Main Content Area */}
+      <div className="flex flex-1 overflow-hidden" ref={historyContainerRef}>
+      {/* Left Sidebar - Chat History (Collapsible) */}
+      {isHistorySidebarOpen && (
+        <>
+          <div
+            style={{ width: `${historySidebarWidth}px` }}
+            className="flex-shrink-0 flex flex-col bg-card border-r transition-all duration-200"
+          >
+            <div className="p-4 border-b flex items-center justify-between">
+              <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">
+                Chat History
+              </h2>
+              <div className="flex items-center gap-1">
+                <Button size="sm" variant="ghost" onClick={startNewChat} title="New Chat">
+                  <Plus className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setIsHistorySidebarOpen(false)} title="Close History">
+                  <PanelLeftClose className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2">
+              {sessions.length === 0 ? (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  <div className="text-center space-y-2">
+                    <MessageSquare className="h-8 w-8 mx-auto opacity-30" />
+                    <p className="text-xs">No chat history</p>
+                    <p className="text-xs opacity-70">Start a new chat to begin</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {sessions.map((s) => (
+                    <div
+                      key={s.id}
+                      className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all hover:bg-accent ${
+                        sessionId === s.id ? "bg-accent" : ""
+                      }`}
+                      onClick={() => loadSession(s.id)}
+                    >
+                      <div className="flex items-center gap-2 truncate flex-1">
+                        <MessageSquare className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                        <span className="text-sm truncate">{s.title}</span>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0 opacity-0 hover:opacity-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteSession(s.id);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Resizable Divider */}
+          <ResizableDivider isDragging={isHistoryDragging} onMouseDown={handleHistoryMouseDown} />
+        </>
+      )}
+
+      {/* Center - Main Chat Area */}
+      <div className="flex flex-1 flex-col min-w-0 bg-background relative">
+        {/* Left edge toggle for History sidebar (when collapsed) */}
+        {!isHistorySidebarOpen && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsHistorySidebarOpen(true)}
+            className="absolute left-0 top-1/2 -translate-y-1/2 z-10 h-24 w-6 rounded-l-none rounded-r-md bg-muted/80 hover:bg-muted border-r border-y"
+            title="Show History"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </Button>
+        )}
+
+        {/* Right edge toggle for Knowledge sidebar (when collapsed) */}
+        {!isKnowledgeSidebarOpen && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsKnowledgeSidebarOpen(true)}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 h-24 w-6 rounded-r-none rounded-l-md bg-muted/80 hover:bg-muted border-l border-y"
+            title="Show Knowledge"
+          >
+            <PanelRightOpen className="h-4 w-4" />
+          </Button>
+        )}
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-muted-foreground">
+              <div className="text-center space-y-2">
+                <Bot className="h-12 w-12 mx-auto opacity-50" />
+                <p>Start a conversation</p>
+                <p className="text-sm">
+                  Select knowledge sources from the sidebar, then ask a question
+                </p>
+              </div>
+            </div>
+          ) : (
+            messages.map((message) => {
+              const isUser = message.role === "user";
+              const hasTransparency = Boolean(message.transparency);
+              return (
+                <div
+                  key={message.id}
+                  className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+                >
+                  <div
+                    className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                      isUser ? "bg-primary text-primary-foreground" : "bg-muted"
+                    }`}
+                  >
+                    {isUser ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                  </div>
+                  <div
+                    className={`max-w-[80%] rounded-lg px-4 py-3 ${
+                      isUser
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-foreground"
+                    }`}
+                  >
+                    {!isUser && (
+                      <div className="flex items-center justify-end mb-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={`h-7 w-7 ${!hasTransparency ? "opacity-40 cursor-not-allowed" : ""}`}
+                          onClick={() => {
+                            if (!hasTransparency) return;
+                            setTransparencyMessageId(message.id);
+                            setShowTransparency(true);
+                          }}
+                          disabled={!hasTransparency}
+                          title={
+                            hasTransparency
+                              ? "View transparency"
+                              : "Transparency not available for this message"
+                          }
+                          aria-label={
+                            hasTransparency
+                              ? "View response transparency details"
+                              : "Transparency not available"
+                          }
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
+                    <div className="text-sm leading-relaxed">
+                      {isUser ? (
+                        <span className="whitespace-pre-wrap">{message.content}</span>
+                      ) : (
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                      )}
+                    </div>
+                    {!isUser && (
+                      <MessageFeedback
+                        messageId={message.id}
+                        sessionId={sessionId}
+                        feedback={message.feedback}
+                        onFeedbackChange={() => {}}
+                      />
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Status Bar - Context and Token Usage */}
+        <ChatStatusBar
+          selectedSkillCount={selectedSkillCount}
+          selectedDocCount={selectedDocCount}
+          selectedUrlCount={selectedUrlCount}
+          modelSpeed={modelSpeed}
+          isLoading={isSendingMessage}
+          onCustomize={() => setIsKnowledgeSidebarOpen(!isKnowledgeSidebarOpen)}
+          onPreviewPrompt={() => setShowPromptPreview(true)}
+          selectedCustomerName={selectedCustomerId ? customers.find(c => c.id === selectedCustomerId)?.company : null}
+        />
+
+        {/* Input Area */}
+        <div className="border-t border-border bg-background p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            {/* Speed Toggle */}
+            <Button
+              size="sm"
+              variant={modelSpeed === "fast" ? "default" : "outline"}
+              onClick={() => setSettingsModelSpeed(modelSpeed === "fast" ? "quality" : "fast")}
+              className="gap-2 h-8"
+              title="Response Speed: Fast (Haiku) or Quality (Sonnet)"
+            >
+              <span className="text-xs">Speed: {modelSpeed === "fast" ? "Fast" : "Quality"}</span>
+            </Button>
+
+            {/* Web Search Toggle */}
+            <Button
+              size="sm"
+              variant={webSearchEnabled ? "default" : "outline"}
+              onClick={() => setSettingsWebSearchEnabled(!webSearchEnabled)}
+              className="gap-2 h-8"
+              title="Enable web search for real-time information"
+            >
+              <span className="text-xs">{webSearchEnabled ? "Search On" : "Local Only"}</span>
+            </Button>
+          </div>
+          <div className="flex items-end gap-3">
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  handleSendMessage(input);
+                  setInput("");
+                }
+              }}
+              placeholder="Type your message..."
+              disabled={isSendingMessage}
+              className="min-h-[52px] resize-none"
+              rows={2}
+            />
+            <Button
+              onClick={() => {
+                if (input.trim()) {
+                  handleSendMessage(input);
+                  setInput("");
+                }
+              }}
+              disabled={isSendingMessage || !input.trim()}
+              size="icon"
+              className="h-12 w-12 shrink-0"
+              aria-label={isSendingMessage ? "Sending message" : "Send message"}
+            >
+              {isSendingMessage ? (
+                <InlineLoader size="sm" />
+              ) : (
+                <Send className="h-5 w-5" />
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Right Sidebar - Knowledge Context (Collapsible) */}
+      {isKnowledgeSidebarOpen && (
+        <>
+          {/* Resizable Divider */}
+          <ResizableDivider isDragging={isKnowledgeDragging} onMouseDown={handleKnowledgeMouseDown} />
+
+          <div
+            ref={knowledgeContainerRef}
+            style={{ width: `${knowledgeSidebarWidth}px` }}
+            className="flex-shrink-0 transition-all duration-200 border-l"
+          >
+            <div className="h-full flex flex-col">
+              <div className="p-3 border-b bg-card flex items-center justify-between">
+                <h2 className="font-semibold text-sm uppercase tracking-wide text-muted-foreground">
+                  Knowledge Context
+                </h2>
+                <Button size="sm" variant="ghost" onClick={() => setIsKnowledgeSidebarOpen(false)} title="Close Knowledge">
+                  <PanelRightClose className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 bg-card space-y-3">
+                <KnowledgeBar
+                  selectedPersona={selectedPersona}
+                  selectedCustomerId={selectedCustomerId}
+                />
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+      </div>
+      {/* End Main Content Area */}
+
+      {/* Message Transparency Modal */}
+      {selectedTransparency && (
+        <TransparencyModal
+          open={showTransparency}
+          onClose={() => {
+            setShowTransparency(false);
+            setTransparencyMessageId(null);
+          }}
+          title="Transparency"
+          subtitle="See the prompt, model, and blocks used for this response"
+          headerColor="gray"
+          configs={[
+            { label: "Composition", value: selectedTransparency.compositionId, color: "purple" },
+            { label: "Model", value: selectedTransparency.model, color: "blue" },
+            { label: "Prompt Blocks", value: selectedTransparency.blockIds.length, color: "blue" },
+            ...(selectedTransparency.runtimeContext?.callMode ? [{ label: "Call Mode", value: "On", color: "yellow" as const }] : []),
+            ...(selectedTransparency.runtimeContext?.userInstructions ? [{ label: "Custom Instructions", value: "Yes", color: "green" as const }] : []),
+          ]}
+          systemPrompt={selectedTransparency.systemPrompt}
+          sections={transparencySections}
+        />
+      )}
+
+      {/* Prompt Preview Modal - shows current configuration before sending */}
+      <TransparencyModal
+        open={showPromptPreview}
+        onClose={() => setShowPromptPreview(false)}
+        title="Prompt Preview"
+        subtitle="Current configuration that will be used for the next message"
+        headerColor="blue"
+        configs={[
+          { label: "Model", value: modelSpeed === "fast" ? "Haiku (Fast)" : "Sonnet (Quality)", color: "blue" },
+          { label: "Call Mode", value: callMode ? "On" : "Off", color: callMode ? "yellow" : "purple" },
+          { label: "Web Search", value: webSearchEnabled ? "Enabled" : "Disabled", color: webSearchEnabled ? "green" : "purple" },
+        ]}
+        systemPrompt={userInstructions || "Default assistant instructions (no custom persona selected)"}
+        sections={
+          selectedBlockIds.length > 0
+            ? [
+                {
+                  id: "selected-blocks",
+                  title: `Selected Context (${selectedBlockIds.length} blocks)`,
+                  content: availableBlocks
+                    .filter((b) => selectedBlockIds.includes(b.id))
+                    .map((b) => `• ${b.title} (${b.libraryId})`)
+                    .join("\n") || "No blocks selected",
+                  defaultExpanded: true,
+                  maxHeight: 240,
+                },
+              ]
+            : [
+                {
+                  id: "no-blocks",
+                  title: "Selected Context",
+                  content: "No knowledge blocks selected. Select skills, documents, or URLs from the Knowledge sidebar to provide context for the AI.",
+                  defaultExpanded: true,
+                  maxHeight: 160,
+                },
+              ]
+        }
+      />
+    </div>
+  );
+}
