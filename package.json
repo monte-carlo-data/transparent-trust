@@ -63,7 +63,7 @@
     "node-pptx-parser": "^1.0.1",
     "papaparse": "^5.5.3",
     "pg": "^8.13.1",
-    "prisma": "^6.19.1",
+    "prisma": "^7.3.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
