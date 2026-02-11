@@ -64,7 +64,7 @@ jobs:
       target_env: ${{ steps.changes.outputs.target_env }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 2
 
@@ -111,7 +111,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -157,7 +157,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -297,7 +297,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -426,7 +426,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -552,7 +552,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -627,7 +627,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -892,7 +892,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -967,7 +967,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
