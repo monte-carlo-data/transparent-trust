@@ -95,6 +95,7 @@
     "seed": "node prisma/seed-minimal.js"
   },
   "overrides": {
-    "fast-xml-parser": "^5.3.4"
+    "fast-xml-parser": "^5.3.4",
+    "eslint-plugin-react": "^7.37.4"
   }
 }
