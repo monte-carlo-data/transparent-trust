@@ -30,6 +30,9 @@ jobs:
       uses: github/codeql-action/init@v4
       with:
         languages: ${{ matrix.language }}
+        config: |
+          paths-ignore:
+            - .github/workflows/deploy.yml
 
     - name: Autobuild
       uses: github/codeql-action/autobuild@v4
