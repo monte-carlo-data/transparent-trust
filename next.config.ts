@@ -5,7 +5,19 @@ const nextConfig: NextConfig = {
   /* config options here */
   reactCompiler: true,
   output: "standalone", // Required for Docker deployment
-  serverExternalPackages: ["node-pptx-parser", "ws"],
+  serverExternalPackages: ["node-pptx-parser", "ws", "pg", "pg-pool", "pg-connection-string", "@prisma/adapter-pg"],
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+        net: false,
+        tls: false,
+        dns: false,
+      };
+    }
+    return config;
+  },
   images: {
     remotePatterns: [
       {
