@@ -77,7 +77,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/diff": "^7.0.2",
+    "@types/diff": "^8.0.0",
     "@types/node": "^25",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
