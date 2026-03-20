@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   /* config options here */
   reactCompiler: true,
   output: "standalone", // Required for Docker deployment
-  serverExternalPackages: ["node-pptx-parser", "ws"],
+  serverExternalPackages: ["node-pptx-parser", "ws", "pg", "@prisma/adapter-pg"],
   images: {
     remotePatterns: [
       {
