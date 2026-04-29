@@ -27,7 +27,7 @@
     "postinstall": "npx prisma generate || true"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.90.0",
+    "@anthropic-ai/sdk": "^0.91.1",
     "@auth/prisma-adapter": "^2.11.2",
     "@aws-sdk/client-s3": "^3.1032.0",
     "@aws-sdk/client-secrets-manager": "^3.1032.0",
